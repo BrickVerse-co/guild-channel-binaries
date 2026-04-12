@@ -3,7 +3,10 @@
 	"version": "1.0.0",
 	"description": "BrickVerse Guild Channels desktop app",
 	"main": "app.js",
-	"author": "Meta Games LLC",
+	"author": {
+		"name": "Meta Games LLC",
+		"email": "support@brickverse.gg"
+	},
 	"license": "Apache-2.0",
 	"homepage": "https://github.com/BrickVerse-co/guild-channel-binaries#readme",
 	"repository": {
@@ -50,7 +53,8 @@
 				"deb"
 			],
 			"icon": "assets/icon.png",
-			"category": "Network"
+			"category": "Network",
+			"maintainer": "Meta Games LLC <support@brickverse.gg>"
 		},
 		"publish": [
 			{
