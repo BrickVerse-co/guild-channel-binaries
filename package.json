@@ -1,0 +1,70 @@
+{
+	"name": "guild-channel-binaries",
+	"version": "1.0.0",
+	"description": "BrickVerse Guild Channels desktop app",
+	"main": "app.js",
+	"author": "Meta Games LLC",
+	"license": "Apache-2.0",
+	"homepage": "https://github.com/BrickVerse-co/guild-channel-binaries#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/BrickVerse-co/guild-channel-binaries.git"
+	},
+	"bugs": {
+		"url": "https://github.com/BrickVerse-co/guild-channel-binaries/issues"
+	},
+	"scripts": {
+		"start": "electron .",
+		"dist": "electron-builder --publish never",
+		"release": "electron-builder --publish always"
+	},
+	"build": {
+		"appId": "gg.brickverse.guildchannels",
+		"productName": "BrickVerse Guild Channels",
+		"directories": {
+			"buildResources": "assets"
+		},
+		"files": [
+			"app.js",
+			"package.json",
+			"assets/**/*",
+			".env"
+		],
+		"mac": {
+			"target": [
+				"dmg",
+				"zip"
+			],
+			"icon": "assets/icon.icns"
+		},
+		"win": {
+			"target": [
+				"nsis",
+				"zip"
+			],
+			"icon": "assets/icon.ico"
+		},
+		"linux": {
+			"target": [
+				"AppImage",
+				"deb"
+			],
+			"icon": "assets/icon.png",
+			"category": "Network"
+		},
+		"publish": [
+			{
+				"provider": "github",
+				"owner": "BrickVerse-co",
+				"repo": "guild-channel-binaries"
+			}
+		]
+	},
+	"dependencies": {
+		"dotenv": "^17.4.2"
+	},
+	"devDependencies": {
+		"electron": "^41.2.0",
+		"electron-builder": "^25.1.8"
+	}
+}

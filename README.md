@@ -1,0 +1,1 @@
+Just a simple electron app to have brickverse guild channels locally, you don't really need this.
