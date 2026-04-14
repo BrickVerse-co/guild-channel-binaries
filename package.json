@@ -19,11 +19,15 @@
 	"scripts": {
 		"start": "electron .",
 		"dist": "electron-builder --publish never",
-		"release": "electron-builder --publish always"
+		"release": "electron-builder --publish always",
+		"build:win:unsigned": "dotenv -e .env -- electron-builder --win --publish never",
+		"build:win": "npm run build:win:unsigned && npm run sign:win",
+		"sign:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\sign-azure.ps1"
 	},
 	"build": {
 		"appId": "gg.brickverse.guildchannels",
-		"productName": "BrickVerse Guild Channels",
+		"productName": "BrickVerseGuildChannels",
+		"artifactName": "${productName}-Setup.${ext}",
 		"directories": {
 			"buildResources": "assets"
 		},
@@ -71,6 +75,7 @@
 		"dotenv": "^17.4.2"
 	},
 	"devDependencies": {
+		"dotenv-cli": "^11.0.0",
 		"electron": "^41.2.0",
 		"electron-builder": "^25.1.8"
 	}

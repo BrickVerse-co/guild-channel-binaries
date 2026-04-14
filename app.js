@@ -17,10 +17,25 @@ const STATE_FILE = path.join(app.getPath("userData"), "window-state.json");
 // Discord Rich Presence
 const DISCORD_CLIENT_ID = "1493410322797826239";
 let mainWindow = null;
+
 let rpcClient = null;
 let rpcReady = false;
 let rpcActivityDebounce = null;
 const rpcPresenceOverrides = new Map();
+let rpcClientDestroyed = false;
+
+function destroyRpcClient() {
+	if (rpcClient && !rpcClientDestroyed) {
+		try {
+			rpcClient.destroy();
+		} catch {
+			// Ignore RPC shutdown errors during app close.
+		}
+		rpcClient = null;
+		rpcClientDestroyed = true;
+		logRpcDebug("RPC client destroyed on app quit");
+	}
+}
 
 function logRpcDebug(message, extra) {
 	if (typeof extra === "undefined") {
@@ -536,17 +551,13 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
 	clearTimeout(rpcActivityDebounce);
 	rpcActivityDebounce = null;
-
-	if (rpcClient) {
-		try {
-			rpcClient.destroy();
-		} catch {
-			// Ignore RPC shutdown errors during app close.
-		}
-		rpcClient = null;
-	}
-
+	destroyRpcClient();
 	if (process.platform !== "darwin") {
 		app.quit();
 	}
+});
+
+// Ensure RPC is destroyed on all app quit events (including task kill, SIGINT, etc)
+app.on("quit", () => {
+	destroyRpcClient();
 });
