@@ -2,20 +2,278 @@
 
 require("dotenv/config");
 
-const { app, BrowserWindow, shell, nativeImage } = require("electron");
+const { app, BrowserWindow, shell, nativeImage, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const DiscordRPC = require("discord-rpc");
 
 const IS_DEV = process.env.NODE_ENV === "development";
-const BASE_URL = IS_DEV ? "http://localhost:3000" : "https://brickverse.gg";
+const LOCAL_BASE_URL = "http://localhost:3000";
+const LIVE_BASE_URL = "https://brickverse.gg";
+let activeBaseUrl = IS_DEV ? LOCAL_BASE_URL : LIVE_BASE_URL;
 
-console.log(`Starting app in ${IS_DEV ? "development" : "production"} mode...`);
-
-const DEFAULT_URL = `${BASE_URL}/guild-channels-hero`;
 const STATE_FILE = path.join(app.getPath("userData"), "window-state.json");
 
-console.log("User data path:", app.getPath("userData"));
-console.log("Launching URL:", DEFAULT_URL);
+// Discord Rich Presence
+const DISCORD_CLIENT_ID = "1493410322797826239";
+let mainWindow = null;
+let rpcClient = null;
+let rpcReady = false;
+let rpcActivityDebounce = null;
+const rpcPresenceOverrides = new Map();
+
+function logRpcDebug(message, extra) {
+	if (typeof extra === "undefined") {
+		console.log(`[BV][RPC] ${message}`);
+		return;
+	}
+
+	console.log(`[BV][RPC] ${message}`, extra);
+}
+
+/**
+ * Parses the window title and URL into Discord presence fields.
+ * Title format from the frontend:
+ *   In channel:  "(N) #channelName | GuildName | Brickverse"
+ *   Guild root:  "GuildName | Brickverse"
+ */
+function parsePresenceFromPage(title, url) {
+	// Strip leading notification count e.g. "(3) "
+	const cleanTitle = title.replace(/^\(\d+\)\s*/, "");
+	const parts = cleanTitle.split(" | ").map((s) => s.trim());
+
+	// /guilds/:id/channels/:channelId — viewing a specific channel
+	if (/\/guilds\/[^/]+\/channels\/[^/?#]+/.test(url)) {
+		return {
+			details: parts[0] ? `Viewing ${parts[0]}` : "Viewing a channel",
+			state: parts[1] || "BrickVerse Guild",
+		};
+	}
+
+	// /guilds/:id/channels — channel landing / setup
+	if (/\/guilds\/[^/]+\/channels/.test(url)) {
+		return {
+			details: "Browsing channels",
+			state: parts[0] || "BrickVerse Guild",
+		};
+	}
+
+	return {
+		details: "In BrickVerse",
+		state: "Guild Channels",
+	};
+}
+
+function sanitizePresenceText(value, fallback) {
+	if (typeof value !== "string") return fallback;
+	const trimmed = value.trim();
+	if (!trimmed) return fallback;
+	return trimmed.slice(0, 128);
+}
+
+function getPresenceOverride(win) {
+	if (!win || win.isDestroyed()) return null;
+	return rpcPresenceOverrides.get(win.webContents.id) || null;
+}
+
+function buildActivityFromWindow(win) {
+	const override = getPresenceOverride(win);
+	if (override) {
+		return {
+			details: sanitizePresenceText(override.details, "In BrickVerse"),
+			state: sanitizePresenceText(override.state, "Guild Channels"),
+			largeImageKey: "logo",
+			largeImageText: "BrickVerse.gg",
+			smallImageKey:
+				typeof override.smallImageKey === "string"
+					? override.smallImageKey
+					: undefined,
+			smallImageText:
+				typeof override.smallImageText === "string"
+					? sanitizePresenceText(override.smallImageText, "")
+					: undefined,
+			instance: false,
+		};
+	}
+
+	const title = win.getTitle();
+	const url = win.webContents.getURL();
+	const { details, state } = parsePresenceFromPage(title, url);
+	return {
+		details,
+		state,
+		largeImageKey: "logo",
+		largeImageText: "BrickVerse.gg",
+		instance: false,
+	};
+}
+
+function setRichPresenceOverride(win, payload) {
+	if (!win || win.isDestroyed()) return;
+
+	if (!payload || typeof payload !== "object") {
+		rpcPresenceOverrides.delete(win.webContents.id);
+		logRpcDebug("cleared rich presence override", {
+			webContentsId: win.webContents.id,
+		});
+		updateRpcActivity(win);
+		return;
+	}
+
+	const nextOverride = {
+		details: sanitizePresenceText(payload.details, "In BrickVerse"),
+		state: sanitizePresenceText(payload.state, "Guild Channels"),
+		smallImageKey:
+			typeof payload.smallImageKey === "string" &&
+			payload.smallImageKey.trim().length > 0
+				? payload.smallImageKey.trim().slice(0, 32)
+				: undefined,
+		smallImageText:
+			typeof payload.smallImageText === "string" &&
+			payload.smallImageText.trim().length > 0
+				? sanitizePresenceText(payload.smallImageText, "")
+				: undefined,
+	};
+
+	rpcPresenceOverrides.set(win.webContents.id, nextOverride);
+	logRpcDebug("updated rich presence override", {
+		webContentsId: win.webContents.id,
+		override: nextOverride,
+	});
+	updateRpcActivity(win);
+}
+
+function setupRpc() {
+	logRpcDebug("setup starting", {
+		clientId: DISCORD_CLIENT_ID,
+		isDev: IS_DEV,
+		baseUrl: activeBaseUrl,
+	});
+
+	if (!DISCORD_CLIENT_ID) {
+		console.warn("[BV] DISCORD_CLIENT_ID not set — Rich Presence disabled");
+		return;
+	}
+
+	DiscordRPC.register(DISCORD_CLIENT_ID);
+	rpcClient = new DiscordRPC.Client({ transport: "ipc" });
+	logRpcDebug("client created", { transport: "ipc" });
+
+	rpcClient.on("ready", () => {
+		rpcReady = true;
+		console.log("[BV] Discord RPC ready");
+		logRpcDebug("ready event received", {
+			hasMainWindow: Boolean(mainWindow),
+			windowDestroyed: mainWindow?.isDestroyed?.() ?? null,
+		});
+		updateRpcActivity(mainWindow);
+	});
+
+	rpcClient.on("disconnected", () => {
+		rpcReady = false;
+		logRpcDebug("disconnected event received");
+	});
+
+	rpcClient.on("error", (err) => {
+		console.warn("[BV] Discord RPC client error:", err?.message || err);
+	});
+
+	logRpcDebug("login requested");
+	rpcClient.login({ clientId: DISCORD_CLIENT_ID }).catch((err) => {
+		console.warn("[BV] Discord RPC login failed:", err.message);
+	});
+}
+
+function updateRpcActivity(win) {
+	if (!rpcReady || !rpcClient || !win || win.isDestroyed()) {
+		logRpcDebug("activity update skipped", {
+			rpcReady,
+			hasClient: Boolean(rpcClient),
+			hasWindow: Boolean(win),
+			windowDestroyed: win?.isDestroyed?.() ?? null,
+		});
+		return;
+	}
+
+	clearTimeout(rpcActivityDebounce);
+	logRpcDebug("activity update scheduled", {
+		title: win.getTitle(),
+		url: win.webContents.getURL(),
+	});
+
+	rpcActivityDebounce = setTimeout(() => {
+		try {
+			const title = win.getTitle();
+			const url = win.webContents.getURL();
+			const activity = buildActivityFromWindow(win);
+
+			logRpcDebug("setting activity", {
+				title,
+				url,
+				activity,
+			});
+
+			rpcClient
+				.setActivity(activity)
+				.then(() => {
+					logRpcDebug("activity set successfully", activity);
+				})
+				.catch((err) => {
+					console.warn("[BV] Discord RPC setActivity failed:", err.message);
+				});
+		} catch (err) {
+			console.warn("[BV] Discord RPC update error:", err.message);
+		}
+	}, 1000);
+}
+
+function getDefaultUrl() {
+	return `${activeBaseUrl}/guild-channels-hero`;
+}
+
+function getBaseMode() {
+	return activeBaseUrl === LOCAL_BASE_URL ? "local" : "live";
+}
+
+function isInternalAppUrl(url) {
+	return url.startsWith(LOCAL_BASE_URL) || url.startsWith(LIVE_BASE_URL);
+}
+
+function getSwitchedUrl(url) {
+	const currentBase = url.startsWith(LOCAL_BASE_URL)
+		? LOCAL_BASE_URL
+		: url.startsWith(LIVE_BASE_URL)
+			? LIVE_BASE_URL
+			: null;
+
+	const nextBase =
+		activeBaseUrl === LOCAL_BASE_URL ? LIVE_BASE_URL : LOCAL_BASE_URL;
+
+	if (!currentBase) {
+		return `${nextBase}/guild-channels-hero`;
+	}
+
+	return `${nextBase}${url.slice(currentBase.length)}`;
+}
+
+function switchBaseUrl(win) {
+	if (!win || win.isDestroyed()) {
+		return getBaseMode();
+	}
+
+	const currentUrl = win.webContents.getURL();
+	const nextUrl = getSwitchedUrl(currentUrl);
+	activeBaseUrl = nextUrl.startsWith(LOCAL_BASE_URL)
+		? LOCAL_BASE_URL
+		: LIVE_BASE_URL;
+	logRpcDebug("switching app base", {
+		from: currentUrl,
+		to: nextUrl,
+		mode: getBaseMode(),
+	});
+	win.loadURL(nextUrl);
+	return getBaseMode();
+}
 
 function getIconPath() {
 	if (process.platform === "win32") {
@@ -29,6 +287,39 @@ function getIconPath() {
 	return path.join(__dirname, "assets", "icon.png");
 }
 
+function extractNotificationCount(title) {
+	const match = title.match(/\((\d+)\)/);
+	return match ? parseInt(match[1], 10) : 0;
+}
+
+function getNotificationIconPath(count) {
+	const assetsPath = path.join(__dirname, "assets", "pings");
+
+	if (count === 0) {
+		return path.join(assetsPath, "unread.png");
+	}
+
+	if (count >= 1 && count <= 9) {
+		return path.join(assetsPath, `${count}.png`);
+	}
+
+	return path.join(assetsPath, "9_or_more.png");
+}
+
+function updateNotificationIcon(win) {
+	const title = win.getTitle();
+	const count = extractNotificationCount(title);
+	const iconPath = getNotificationIconPath(count);
+
+	if (fs.existsSync(iconPath)) {
+		if (process.platform === "darwin") {
+			app.dock.setIcon(iconPath);
+		} else {
+			win.setIcon(iconPath);
+		}
+	}
+}
+
 function loadState() {
 	try {
 		if (fs.existsSync(STATE_FILE)) {
@@ -40,9 +331,8 @@ function loadState() {
 	}
 
 	return {
-		width: 1200,
-		height: 800,
-		lastUrl: DEFAULT_URL,
+		width: 1280,
+		height: 860,
 		isMaximized: false,
 	};
 }
@@ -55,7 +345,6 @@ function saveState(win) {
 		const data = {
 			...bounds,
 			isMaximized: win.isMaximized(),
-			lastUrl: win.webContents.getURL() || DEFAULT_URL,
 		};
 
 		fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), "utf8");
@@ -67,21 +356,37 @@ function saveState(win) {
 function createWindow() {
 	const state = loadState();
 	const iconPath = getIconPath();
+	logRpcDebug("creating main window", state);
 
 	const win = new BrowserWindow({
-		width: state.width || 1200,
-		height: state.height || 800,
+		width: state.width || 1280,
+		height: state.height || 860,
+		minWidth: 960,
+		minHeight: 640,
 		x: Number.isFinite(state.x) ? state.x : undefined,
 		y: Number.isFinite(state.y) ? state.y : undefined,
 		show: false,
+		frame: false,
+		titleBarStyle: process.platform === "darwin" ? "hidden" : undefined,
 		backgroundColor: "#313338",
 		autoHideMenuBar: true,
 		icon: nativeImage.createFromPath(iconPath),
 		webPreferences: {
 			contextIsolation: true,
 			nodeIntegration: false,
-			// No partition set = default persistent session
+			sandbox: false,
+			preload: path.join(__dirname, "preload.js"),
 		},
+	});
+
+	mainWindow = win;
+	const webContentsId = win.webContents.id;
+	logRpcDebug("main window assigned");
+	win.on("closed", () => {
+		rpcPresenceOverrides.delete(webContentsId);
+		if (mainWindow === win) {
+			mainWindow = null;
+		}
 	});
 
 	if (state.isMaximized) {
@@ -92,7 +397,7 @@ function createWindow() {
 		win.show();
 	});
 
-	win.loadURL(state.lastUrl || DEFAULT_URL);
+	win.loadURL(getDefaultUrl());
 
 	const persist = () => saveState(win);
 
@@ -102,23 +407,123 @@ function createWindow() {
 	win.on("unmaximize", persist);
 	win.on("close", persist);
 
-	win.webContents.on("did-navigate", persist);
-	win.webContents.on("did-redirect-navigation", persist);
+	win.webContents.on("did-finish-load", () => {
+		logRpcDebug("did-finish-load", {
+			title: win.getTitle(),
+			url: win.webContents.getURL(),
+		});
+		persist();
+		updateNotificationIcon(win);
+		updateRpcActivity(win);
+	});
 
-	// Open external links in the normal browser.
+	win.webContents.on("did-navigate", () => {
+		logRpcDebug("did-navigate", {
+			title: win.getTitle(),
+			url: win.webContents.getURL(),
+		});
+		persist();
+		updateNotificationIcon(win);
+		updateRpcActivity(win);
+	});
+
+	win.webContents.on("did-redirect-navigation", () => {
+		logRpcDebug("did-redirect-navigation", {
+			title: win.getTitle(),
+			url: win.webContents.getURL(),
+		});
+		persist();
+	});
+
+	win.webContents.on("page-title-updated", () => {
+		logRpcDebug("page-title-updated", {
+			title: win.getTitle(),
+			url: win.webContents.getURL(),
+		});
+		updateNotificationIcon(win);
+		updateRpcActivity(win);
+	});
+
 	win.webContents.setWindowOpenHandler(({ url }) => {
-		const sameSite = url.startsWith(BASE_URL);
-		if (!sameSite) {
+		if (isInternalAppUrl(url)) {
+			// Force same-window navigation instead of opening a new window
+			setImmediate(() => win.loadURL(url));
+		} else {
 			shell.openExternal(url);
-			return { action: "deny" };
 		}
-		return { action: "allow" };
+
+		return { action: "deny" };
+	});
+
+	win.webContents.on("will-navigate", (event, url) => {
+		const sameSite = isInternalAppUrl(url);
+
+		if (!sameSite) {
+			event.preventDefault();
+			shell.openExternal(url);
+		}
 	});
 
 	return win;
 }
 
+function handleWindowControl(event, action) {
+	const win = BrowserWindow.fromWebContents(event.sender);
+	if (!win || win.isDestroyed()) return false;
+
+	switch (action) {
+		case "minimize":
+			win.minimize();
+			return true;
+		case "toggle-base-url":
+			return switchBaseUrl(win);
+		case "get-base-url-mode":
+			return getBaseMode();
+		case "toggle-maximize":
+			if (win.isMaximized()) {
+				win.unmaximize();
+				return false;
+			}
+
+			win.maximize();
+			return true;
+		case "is-maximized":
+			return win.isMaximized();
+		case "close":
+			win.close();
+			return true;
+		default:
+			throw new Error(`Unknown window control action: ${action}`);
+	}
+}
+
+ipcMain.handle("bv-window-control", handleWindowControl);
+
+ipcMain.handle("bv-window-minimize", (event) => {
+	return handleWindowControl(event, "minimize");
+});
+
+ipcMain.handle("bv-window-toggle-maximize", (event) => {
+	return handleWindowControl(event, "toggle-maximize");
+});
+
+ipcMain.handle("bv-window-is-maximized", (event) => {
+	return handleWindowControl(event, "is-maximized");
+});
+
+ipcMain.handle("bv-window-close", (event) => {
+	return handleWindowControl(event, "close");
+});
+
+ipcMain.handle("bv-set-rich-presence-context", (event, payload) => {
+	const win = BrowserWindow.fromWebContents(event.sender);
+	if (!win || win.isDestroyed()) return false;
+	setRichPresenceOverride(win, payload);
+	return true;
+});
+
 app.whenReady().then(() => {
+	setupRpc();
 	createWindow();
 
 	app.on("activate", () => {
@@ -129,8 +534,18 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-	// Standard Electron macOS behavior:
-	// keep app alive until user quits explicitly
+	clearTimeout(rpcActivityDebounce);
+	rpcActivityDebounce = null;
+
+	if (rpcClient) {
+		try {
+			rpcClient.destroy();
+		} catch {
+			// Ignore RPC shutdown errors during app close.
+		}
+		rpcClient = null;
+	}
+
 	if (process.platform !== "darwin") {
 		app.quit();
 	}
