@@ -209,7 +209,7 @@ function updateRpcActivity(win) {
 }
 
 function getDefaultUrl() {
-	return `${activeBaseUrl}/guild-channels-hero`;
+	return `${activeBaseUrl}/guilds/0/channels/landing`;
 }
 
 function getBaseMode() {
@@ -231,7 +231,7 @@ function getSwitchedUrl(url) {
 		activeBaseUrl === LOCAL_BASE_URL ? LIVE_BASE_URL : LOCAL_BASE_URL;
 
 	if (!currentBase) {
-		return `${nextBase}/guild-channels-hero`;
+		return `${nextBase}/guilds/0/channels/landing`;
 	}
 
 	return `${nextBase}${url.slice(currentBase.length)}`;
