@@ -20,7 +20,7 @@
 		"start": "electron .",
 		"dist": "electron-builder --publish never",
 		"release": "electron-builder --publish always",
-		"build:win:unsigned": "dotenv -e .env -- electron-builder --win --publish never",
+		"build:win:unsigned": "electron-builder --win --publish never",
 		"build:win": "npm run build:win:unsigned && npm run sign:win",
 		"sign:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\sign-azure.ps1"
 	},
@@ -31,34 +31,32 @@
 		"directories": {
 			"buildResources": "assets"
 		},
+		"asarUnpack": [
+			"assets/**"
+		],
 		"files": [
 			"app.js",
 			"preload.js",
 			"desktop-titlebar.js",
 			"package.json",
-			"assets/**/*",
-			".env"
+			"assets/**/*"
 		],
 		"mac": {
 			"target": [
 				"dmg",
 				"zip"
-			],
-			"icon": "assets/icon.icns"
+			]
 		},
 		"win": {
 			"target": [
-				"nsis",
-				"zip"
-			],
-			"icon": "assets/icon.ico"
+				"nsis"
+			]
 		},
 		"linux": {
 			"target": [
 				"AppImage",
 				"deb"
 			],
-			"icon": "assets/icon.png",
 			"category": "Network",
 			"maintainer": "Meta Games LLC <support@brickverse.gg>"
 		},

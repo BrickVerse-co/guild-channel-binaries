@@ -2,7 +2,16 @@
 
 require("dotenv/config");
 
-const { app, BrowserWindow, shell, nativeImage, ipcMain } = require("electron");
+const {
+	app,
+	BrowserWindow,
+	shell,
+	nativeImage,
+	ipcMain,
+	Tray,
+} = require("electron");
+// Tray icon for notifications (Windows/Linux)
+let tray = null;
 const path = require("node:path");
 const fs = require("node:fs");
 const DiscordRPC = require("discord-rpc");
@@ -128,9 +137,6 @@ function setRichPresenceOverride(win, payload) {
 
 	if (!payload || typeof payload !== "object") {
 		rpcPresenceOverrides.delete(win.webContents.id);
-		logRpcDebug("cleared rich presence override", {
-			webContentsId: win.webContents.id,
-		});
 		updateRpcActivity(win);
 		return;
 	}
@@ -151,20 +157,10 @@ function setRichPresenceOverride(win, payload) {
 	};
 
 	rpcPresenceOverrides.set(win.webContents.id, nextOverride);
-	logRpcDebug("updated rich presence override", {
-		webContentsId: win.webContents.id,
-		override: nextOverride,
-	});
 	updateRpcActivity(win);
 }
 
 function setupRpc() {
-	logRpcDebug("setup starting", {
-		clientId: DISCORD_CLIENT_ID,
-		isDev: IS_DEV,
-		baseUrl: activeBaseUrl,
-	});
-
 	if (!DISCORD_CLIENT_ID) {
 		console.warn("[BV] DISCORD_CLIENT_ID not set — Rich Presence disabled");
 		return;
@@ -172,28 +168,21 @@ function setupRpc() {
 
 	DiscordRPC.register(DISCORD_CLIENT_ID);
 	rpcClient = new DiscordRPC.Client({ transport: "ipc" });
-	logRpcDebug("client created", { transport: "ipc" });
 
 	rpcClient.on("ready", () => {
 		rpcReady = true;
 		console.log("[BV] Discord RPC ready");
-		logRpcDebug("ready event received", {
-			hasMainWindow: Boolean(mainWindow),
-			windowDestroyed: mainWindow?.isDestroyed?.() ?? null,
-		});
 		updateRpcActivity(mainWindow);
 	});
 
 	rpcClient.on("disconnected", () => {
 		rpcReady = false;
-		logRpcDebug("disconnected event received");
 	});
 
 	rpcClient.on("error", (err) => {
 		console.warn("[BV] Discord RPC client error:", err?.message || err);
 	});
 
-	logRpcDebug("login requested");
 	rpcClient.login({ clientId: DISCORD_CLIENT_ID }).catch((err) => {
 		console.warn("[BV] Discord RPC login failed:", err.message);
 	});
@@ -201,41 +190,18 @@ function setupRpc() {
 
 function updateRpcActivity(win) {
 	if (!rpcReady || !rpcClient || !win || win.isDestroyed()) {
-		logRpcDebug("activity update skipped", {
-			rpcReady,
-			hasClient: Boolean(rpcClient),
-			hasWindow: Boolean(win),
-			windowDestroyed: win?.isDestroyed?.() ?? null,
-		});
 		return;
 	}
 
 	clearTimeout(rpcActivityDebounce);
-	logRpcDebug("activity update scheduled", {
-		title: win.getTitle(),
-		url: win.webContents.getURL(),
-	});
 
 	rpcActivityDebounce = setTimeout(() => {
 		try {
-			const title = win.getTitle();
-			const url = win.webContents.getURL();
 			const activity = buildActivityFromWindow(win);
 
-			logRpcDebug("setting activity", {
-				title,
-				url,
-				activity,
+			rpcClient.setActivity(activity).catch((err) => {
+				console.warn("[BV] Discord RPC setActivity failed:", err.message);
 			});
-
-			rpcClient
-				.setActivity(activity)
-				.then(() => {
-					logRpcDebug("activity set successfully", activity);
-				})
-				.catch((err) => {
-					console.warn("[BV] Discord RPC setActivity failed:", err.message);
-				});
 		} catch (err) {
 			console.warn("[BV] Discord RPC update error:", err.message);
 		}
@@ -281,11 +247,6 @@ function switchBaseUrl(win) {
 	activeBaseUrl = nextUrl.startsWith(LOCAL_BASE_URL)
 		? LOCAL_BASE_URL
 		: LIVE_BASE_URL;
-	logRpcDebug("switching app base", {
-		from: currentUrl,
-		to: nextUrl,
-		mode: getBaseMode(),
-	});
 	win.loadURL(nextUrl);
 	return getBaseMode();
 }
@@ -308,29 +269,71 @@ function extractNotificationCount(title) {
 }
 
 function getNotificationIconPath(count) {
-	const assetsPath = path.join(__dirname, "assets", "pings");
+	const appPath = app.isPackaged ? process.resourcesPath : app.getAppPath();
+	const platform = process.platform;
+	const assetsPath = app.isPackaged
+		? path.join(appPath, "app.asar.unpacked", "assets", "pings")
+		: path.join(appPath, "assets", "pings");
 
-	if (count === 0) {
-		return path.join(assetsPath, "unread.png");
-	}
+	let fileName = "unread.png";
 
 	if (count >= 1 && count <= 9) {
-		return path.join(assetsPath, `${count}.png`);
+		fileName = `${count}.png`;
+	} else if (count > 9) {
+		fileName = "9_or_more.png";
 	}
 
-	return path.join(assetsPath, "9_or_more.png");
+	// Windows icons use overlays on the pre-existing icons
+	// so we only need the literal number icons.
+	if (platform === "win32") {
+		// if it's april 1st - 2nd we use the infinite symbol
+		const now = new Date();
+		if (now.getMonth() === 3 && (now.getDate() === 1 || now.getDate() === 2)) {
+			fileName = "win_infinite.png";
+		} else {
+			fileName = `win_${fileName}`;
+		}
+	}
+
+	const fullPath = path.join(assetsPath, fileName);
+	if (!fs.existsSync(fullPath)) {
+		console.warn(`[BV] Icon not found, falling back: ${fullPath}`);
+		return getIconPath();
+	}
+
+	return fullPath;
 }
 
 function updateNotificationIcon(win) {
+	if (!win || win.isDestroyed()) return;
+
 	const title = win.getTitle();
 	const count = extractNotificationCount(title);
 	const iconPath = getNotificationIconPath(count);
+	const image = nativeImage.createFromPath(iconPath);
 
-	if (fs.existsSync(iconPath)) {
-		if (process.platform === "darwin") {
-			app.dock.setIcon(iconPath);
-		} else {
-			win.setIcon(iconPath);
+	if (process.platform === "darwin") {
+		app.dock.setIcon(image);
+	} else {
+		try {
+			if (!tray) {
+				tray = new Tray(image);
+				tray.setToolTip("BrickVerse Guild Channels");
+			} else {
+				tray.setImage(image);
+			}
+
+			// Windows can use overlay icons as setIcon doesn't work
+			if (process.platform === "win32") {
+				win.setOverlayIcon(
+					nativeImage.createFromPath(iconPath),
+					"Notifications",
+				);
+			} else {
+				win.setIcon(image);
+			}
+		} catch (e) {
+			console.error("[BV] Tray/Icon Error:", e);
 		}
 	}
 }
@@ -371,7 +374,6 @@ function saveState(win) {
 function createWindow() {
 	const state = loadState();
 	const iconPath = getIconPath();
-	logRpcDebug("creating main window", state);
 
 	const win = new BrowserWindow({
 		width: state.width || 1280,
@@ -394,9 +396,13 @@ function createWindow() {
 		},
 	});
 
+	if (app.isPackaged) {
+		//	win.webContents.openDevTools({ mode: "detach" });
+	}
+
 	mainWindow = win;
 	const webContentsId = win.webContents.id;
-	logRpcDebug("main window assigned");
+
 	win.on("closed", () => {
 		rpcPresenceOverrides.delete(webContentsId);
 		if (mainWindow === win) {
@@ -423,38 +429,22 @@ function createWindow() {
 	win.on("close", persist);
 
 	win.webContents.on("did-finish-load", () => {
-		logRpcDebug("did-finish-load", {
-			title: win.getTitle(),
-			url: win.webContents.getURL(),
-		});
 		persist();
 		updateNotificationIcon(win);
 		updateRpcActivity(win);
 	});
 
 	win.webContents.on("did-navigate", () => {
-		logRpcDebug("did-navigate", {
-			title: win.getTitle(),
-			url: win.webContents.getURL(),
-		});
 		persist();
 		updateNotificationIcon(win);
 		updateRpcActivity(win);
 	});
 
 	win.webContents.on("did-redirect-navigation", () => {
-		logRpcDebug("did-redirect-navigation", {
-			title: win.getTitle(),
-			url: win.webContents.getURL(),
-		});
 		persist();
 	});
 
 	win.webContents.on("page-title-updated", () => {
-		logRpcDebug("page-title-updated", {
-			title: win.getTitle(),
-			url: win.webContents.getURL(),
-		});
 		updateNotificationIcon(win);
 		updateRpcActivity(win);
 	});
@@ -478,6 +468,8 @@ function createWindow() {
 			shell.openExternal(url);
 		}
 	});
+
+	updateNotificationIcon(win);
 
 	return win;
 }
@@ -538,6 +530,10 @@ ipcMain.handle("bv-set-rich-presence-context", (event, payload) => {
 });
 
 app.whenReady().then(() => {
+	if (process.platform === "win32") {
+		app.setAppUserModelId("gg.brickverse.guildchannels");
+	}
+
 	setupRpc();
 	createWindow();
 
@@ -552,6 +548,10 @@ app.on("window-all-closed", () => {
 	clearTimeout(rpcActivityDebounce);
 	rpcActivityDebounce = null;
 	destroyRpcClient();
+	if (tray) {
+		tray.destroy();
+		tray = null;
+	}
 	if (process.platform !== "darwin") {
 		app.quit();
 	}
