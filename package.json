@@ -2,7 +2,7 @@
 	"name": "guild-channel-binaries",
 	"version": "1.0.0",
 	"description": "BrickVerse Guild Channels desktop app",
-	"main": "app.js",
+	"main": "dist/main.js",
 	"author": {
 		"name": "Meta Games LLC",
 		"email": "support@brickverse.gg"
@@ -17,10 +17,11 @@
 		"url": "https://github.com/BrickVerse-co/guild-channel-binaries/issues"
 	},
 	"scripts": {
-		"start": "electron .",
-		"dist": "electron-builder --publish never",
-		"release": "electron-builder --publish always",
-		"build:win:unsigned": "electron-builder --win --publish never",
+		"build": "tsc",
+		"start": "npm run build && electron .",
+		"dist": "npm run build && electron-builder --publish never",
+		"release": "npm run build && electron-builder --publish always",
+		"build:win:unsigned": "npm run build && electron-builder --win --publish never",
 		"build:win": "npm run build:win:unsigned && npm run sign:win",
 		"sign:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\sign-azure.ps1"
 	},
@@ -35,12 +36,15 @@
 			"assets/**"
 		],
 		"files": [
-			"app.js",
-			"preload.js",
-			"desktop-titlebar.js",
+			"dist/**/*",
+			"src/**/*",
 			"package.json",
 			"assets/**/*"
 		],
+		"extraResources": [
+			"assets/**/*"
+		],
+		"types": "dist/main.d.ts",
 		"mac": {
 			"target": [
 				"dmg",
@@ -70,9 +74,11 @@
 	},
 	"dependencies": {
 		"discord-rpc": "^4.0.1",
-		"dotenv": "^17.4.2"
+		"dotenv": "^17.4.2",
+		"electron-updater": "^6.8.3"
 	},
 	"devDependencies": {
+		"@types/discord-rpc": "^4.0.10",
 		"dotenv-cli": "^11.0.0",
 		"electron": "^41.2.0",
 		"electron-builder": "^25.1.8"
