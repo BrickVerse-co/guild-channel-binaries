@@ -8,6 +8,7 @@
 		"email": "support@brickverse.gg"
 	},
 	"license": "Apache-2.0",
+	"types": "dist/main.d.ts",
 	"homepage": "https://github.com/BrickVerse-co/guild-channel-binaries#readme",
 	"repository": {
 		"type": "git",
@@ -44,7 +45,6 @@
 		"extraResources": [
 			"assets/**/*"
 		],
-		"types": "dist/main.d.ts",
 		"mac": {
 			"target": [
 				"dmg",

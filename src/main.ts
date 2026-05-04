@@ -15,7 +15,7 @@ import {
 } from "./rpc";
 import { getIconPath, updateNotificationIcon } from "./notification";
 import { loadState, saveState } from "./windowState";
-import { checkForUpdates } from "./updater";
+import { checkForUpdates, setupAutoUpdater } from "./updater";
 
 let rpcEnabled = true;
 ipcMain.handle("bv-open-devtools", (event) => {
@@ -127,6 +127,7 @@ function createWindow(): BrowserWindow {
 	});
 
 	mainWindow = win;
+	setupAutoUpdater(win);
 	win.on("closed", () => {
 		if (mainWindow === win) {
 			mainWindow = null;
@@ -261,17 +262,96 @@ app.whenReady().then(() => {
 	});
 });
 
+let isQuitting = false;
+let rpcDestroyed = false;
+
+async function shutdownRpc(reason: string) {
+	if (rpcDestroyed) return;
+	rpcDestroyed = true;
+
+	console.log(`[RPC] Shutting down Discord RPC: ${reason}`);
+
+	try {
+		destroyRpcClient();
+	} catch (err) {
+		console.warn("[RPC] Failed to destroy RPC client:", err);
+	}
+}
+
+app.on("before-quit", () => {
+	isQuitting = true;
+	void shutdownRpc("before-quit");
+});
+
+app.on("will-quit", (event) => {
+	isQuitting = true;
+	void shutdownRpc("will-quit");
+});
+
+app.on("quit", () => {
+	void shutdownRpc("quit");
+});
+
 app.on("window-all-closed", () => {
-	destroyRpcClient();
+	void shutdownRpc("window-all-closed");
+
 	if (tray) {
 		tray.destroy();
 		tray = null;
 	}
+
 	if (process.platform !== "darwin") {
 		app.quit();
 	}
 });
 
-app.on("quit", () => {
-	destroyRpcClient();
+app.on("browser-window-focus", () => {
+	if (!isQuitting && mainWindow) {
+		updateRpcActivity(mainWindow);
+	}
+});
+
+app.on("activate", () => {
+	if (!isQuitting && mainWindow) {
+		updateRpcActivity(mainWindow);
+	}
+});
+
+app.on("second-instance", () => {
+	if (!isQuitting && mainWindow) {
+		mainWindow.show();
+		mainWindow.focus();
+		updateRpcActivity(mainWindow);
+	}
+});
+
+process.once("exit", () => {
+	// Cannot reliably await here
+	void shutdownRpc("process-exit");
+});
+
+process.once("SIGINT", async () => {
+	await shutdownRpc("SIGINT");
+	process.exit(0);
+});
+
+process.once("SIGTERM", async () => {
+	await shutdownRpc("SIGTERM");
+	process.exit(0);
+});
+
+process.once("uncaughtException", async (err) => {
+	console.error("[Fatal] uncaughtException:", err);
+	await shutdownRpc("uncaughtException");
+	process.exit(1);
+});
+
+process.once("unhandledRejection", async (reason) => {
+	console.error("[Fatal] unhandledRejection:", reason);
+	await shutdownRpc("unhandledRejection");
+	process.exit(1);
+});
+
+process.once("warning", (warning) => {
+	console.warn("[Warning] Process warning:", warning);
 });

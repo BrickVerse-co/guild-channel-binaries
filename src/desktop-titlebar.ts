@@ -215,6 +215,7 @@ function bindEvents(bar: HTMLElement) {
 		showAboutModal();
 	});
 	function showSettingsModal() {
+		const api = getDesktopApi();
 		let modal = document.getElementById("bv-settings-modal");
 		if (modal) {
 			modal.style.display = "flex";
@@ -260,13 +261,13 @@ function bindEvents(bar: HTMLElement) {
 			"bv-setting-rpc",
 		) as HTMLInputElement;
 		devtoolsCheckbox.addEventListener("change", () => {
-			if (window.bvDesktop?.openDevTools) {
-				window.bvDesktop.openDevTools();
+			if (api?.openDevTools) {
+				api.openDevTools();
 			}
 		});
 		rpcCheckbox.addEventListener("change", () => {
-			if (window.bvDesktop?.setRpcEnabled) {
-				window.bvDesktop.setRpcEnabled(rpcCheckbox.checked);
+			if (api?.setRpcEnabled) {
+				api.setRpcEnabled(rpcCheckbox.checked);
 			}
 		});
 		// Update check button
@@ -276,8 +277,8 @@ function bindEvents(bar: HTMLElement) {
 			event.stopPropagation();
 			try {
 				updateBtn.setAttribute("disabled", "true");
-				if (window.bvDesktop?.checkForUpdates) {
-					await window.bvDesktop.checkForUpdates();
+				if (api?.checkForUpdates) {
+					await api.checkForUpdates();
 				}
 			} catch (err) {
 				console.error("[BV] checkForUpdates failed", err);
@@ -287,48 +288,60 @@ function bindEvents(bar: HTMLElement) {
 		});
 	}
 
-	function showAboutModal() {
+	async function showAboutModal() {
+		const api = getDesktopApi();
 		let modal = document.getElementById("bv-about-modal");
 		if (modal) {
 			modal.style.display = "block";
+		} else {
+			const modalEl = document.createElement("div");
+			modalEl.id = "bv-about-modal";
+			modalEl.style.cssText =
+				"position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483648;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
+			modalEl.innerHTML = `
+				<div style="background:#232428;padding:32px 28px 24px 28px;border-radius:12px;min-width:340px;max-width:90vw;box-shadow:0 8px 32px #0008;position:relative;">
+					<h2 style="margin-top:0;font-size:18px;color:#fff;">About</h2>
+					<div id="bv-about-info" style="color:#dbdee1;font-size:14px;margin-bottom:18px;">
+						Loading version info...
+					</div>
+					<button id="bv-about-close" style="margin-top:8px;padding:6px 18px;border-radius:6px;background:#444;color:#fff;border:none;">Close</button>
+				</div>
+			`;
+			document.body.appendChild(modalEl);
+			modalEl.addEventListener("click", (e) => {
+				if (e.target === modalEl) modalEl.style.display = "none";
+			});
+			document
+				.getElementById("bv-about-close")
+				?.addEventListener("click", () => {
+					modalEl.style.display = "none";
+				});
+			modal = modalEl;
+		}
+		const el = document.getElementById("bv-about-info");
+		if (!el) return;
+		if (!api?.getAboutInfo) {
+			el.textContent = "Version info is unavailable.";
 			return;
 		}
-		modal = document.createElement("div");
-		modal.id = "bv-about-modal";
-		modal.style.cssText =
-			"position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483648;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;";
-		modal.innerHTML = `
-			<div style="background:#232428;padding:32px 28px 24px 28px;border-radius:12px;min-width:340px;max-width:90vw;box-shadow:0 8px 32px #0008;position:relative;">
-				<h2 style="margin-top:0;font-size:18px;color:#fff;">About</h2>
-				<div id="bv-about-info" style="color:#dbdee1;font-size:14px;margin-bottom:18px;">
-					Loading version info...
-				</div>
-				<button id="bv-about-close" style="margin-top:8px;padding:6px 18px;border-radius:6px;background:#444;color:#fff;border:none;">Close</button>
-			</div>
-		`;
-		document.body.appendChild(modal);
-		modal.addEventListener("click", (e) => {
-			if (e.target === modal) modal.style.display = "none";
-		});
-		document.getElementById("bv-about-close")?.addEventListener("click", () => {
-			modal.style.display = "none";
-		});
-		// Fetch and display version info from main process
-		if (window.bvDesktop?.getAboutInfo) {
-			window.bvDesktop.getAboutInfo().then((info: any) => {
-				const el = document.getElementById("bv-about-info");
-				if (el && info) {
-					el.innerHTML = `
-						<b>BrickVerse Guild Channels</b><br>
-						Version: <b>${info.version}</b><br>
-						Electron: <b>${info.electron}</b><br>
-						Chromium: <b>${info.chrome}</b><br>
-						Node.js: <b>${info.node}</b><br>
-						V8: <b>${info.v8}</b><br>
-						Platform: <b>${info.platform}</b> (${info.arch})<br>
-					`;
-				}
-			});
+		try {
+			const info = await api.getAboutInfo();
+			if (!info) {
+				el.textContent = "Version info is unavailable.";
+				return;
+			}
+			el.innerHTML = `
+				<b>BrickVerse Guild Channels</b><br>
+				Version: <b>${info.version}</b><br>
+				Electron: <b>${info.electron}</b><br>
+				Chromium: <b>${info.chrome}</b><br>
+				Node.js: <b>${info.node}</b><br>
+				V8: <b>${info.v8}</b><br>
+				Platform: <b>${info.platform}</b> (${info.arch})<br>
+			`;
+		} catch (err) {
+			console.error("[BV] getAboutInfo failed", err);
+			el.textContent = "Failed to load version info.";
 		}
 	}
 	const swallowMouseDown = (event: MouseEvent) => {

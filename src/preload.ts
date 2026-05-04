@@ -1,22 +1,24 @@
-// Use window.require to get ipcRenderer for maximum compatibility
-const electron = (window as any).require
-	? (window as any).require("electron")
-	: undefined;
-const ipcRenderer = electron ? electron.ipcRenderer : undefined;
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 import { installDesktopTitlebar } from "./desktop-titlebar";
 
+const invokeSafe = (channel: string, ...args: any[]) => {
+	try {
+		return ipcRenderer.invoke(channel, ...args);
+	} catch (err) {
+		console.error(`[BV] ipc invoke failed: ${channel}`, err);
+		return undefined;
+	}
+};
+
 const windowControl = (action: string) => {
-	if (!ipcRenderer) throw new Error("ipcRenderer unavailable");
-	return ipcRenderer.invoke("bv-window-control", action);
+	return invokeSafe("bv-window-control", action);
 };
 
 const setRichPresenceContext = (payload: any) => {
-	if (!ipcRenderer) throw new Error("ipcRenderer unavailable");
-	return ipcRenderer.invoke("bv-set-rich-presence-context", payload ?? null);
+	return invokeSafe("bv-set-rich-presence-context", payload ?? null);
 };
 
-contextBridge.exposeInMainWorld("bvDesktop", {
+const desktopApi = {
 	windowControl,
 	setRichPresenceContext,
 	getBaseUrlMode: () => windowControl("get-base-url-mode"),
@@ -25,17 +27,18 @@ contextBridge.exposeInMainWorld("bvDesktop", {
 	toggleMaximize: () => windowControl("toggle-maximize"),
 	isMaximized: () => windowControl("is-maximized"),
 	close: () => windowControl("close"),
-	checkForUpdates: () => ipcRenderer.invoke("bv-check-for-updates"),
-	openDevTools: () => ipcRenderer.invoke("bv-open-devtools"),
+	checkForUpdates: () => invokeSafe("bv-check-for-updates"),
+	openDevTools: () => invokeSafe("bv-open-devtools"),
 	setRpcEnabled: (enabled: boolean) =>
-		ipcRenderer.invoke("bv-set-rpc-enabled", enabled),
-	getAboutInfo: () => ipcRenderer.invoke("bv-get-about-info"),
-});
+		invokeSafe("bv-set-rpc-enabled", enabled),
+	getAboutInfo: () => invokeSafe("bv-get-about-info"),
+};
 
+contextBridge.exposeInMainWorld("bvDesktop", desktopApi);
 
 const boot = () => {
 	try {
-		installDesktopTitlebar(window.bvDesktop);
+		installDesktopTitlebar(desktopApi);
 	} catch (err) {
 		console.error("[BV] installDesktopTitlebar failed", err);
 	}

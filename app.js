@@ -34,6 +34,7 @@ const rpcPresenceOverrides = new Map();
 let rpcClientDestroyed = false;
 
 function destroyRpcClient() {
+	console.log("[BV] Destroying RPC client...");
 	if (rpcClient && !rpcClientDestroyed) {
 		try {
 			rpcClient.destroy();
@@ -560,4 +561,17 @@ app.on("window-all-closed", () => {
 // Ensure RPC is destroyed on all app quit events (including task kill, SIGINT, etc)
 app.on("quit", () => {
 	destroyRpcClient();
+});
+
+// Ensure RPC is destroyed on uncaught exceptions to prevent hanging processes
+process.on("uncaughtException", (err) => {
+	console.error("Uncaught exception:", err);
+	destroyRpcClient();
+});
+
+// Handle graceful shutdown on SIGINT (e.g., Ctrl+C in terminal)
+process.on("SIGINT", () => {
+	console.log("Received SIGINT, shutting down...");
+	destroyRpcClient();
+	process.exit(0);
 });

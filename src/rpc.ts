@@ -7,19 +7,30 @@ let rpcReady = false;
 let rpcActivityDebounce: NodeJS.Timeout | null = null;
 const rpcPresenceOverrides = new Map<number, any>();
 let rpcClientDestroyed = false;
+let rpcShutdownRequested = false;
 
 export function destroyRpcClient() {
-	if (rpcClient && !rpcClientDestroyed) {
+	console.log("[BV] Destroying RPC client...");
+	rpcShutdownRequested = true;
+	rpcReady = false;
+	rpcPresenceOverrides.clear();
+	if (rpcActivityDebounce) {
+		clearTimeout(rpcActivityDebounce);
+		rpcActivityDebounce = null;
+	}
+
+	if (!rpcClientDestroyed && rpcClient) {
 		try {
+			rpcClient.removeAllListeners();
 			rpcClient.destroy();
 		} catch {
 			// Ignore RPC shutdown errors during app close.
 		}
-
-		rpcClient = null;
-		rpcClientDestroyed = true;
-		logRpcDebug("RPC client destroyed on app quit");
 	}
+
+	rpcClient = null;
+	rpcClientDestroyed = true;
+	logRpcDebug("RPC client destroyed on app quit");
 }
 
 function logRpcDebug(message: string, extra?: any) {
@@ -31,15 +42,24 @@ function logRpcDebug(message: string, extra?: any) {
 }
 
 export function setupRpc() {
+	if (rpcShutdownRequested || rpcClientDestroyed) {
+		logRpcDebug("Skipping RPC setup after shutdown");
+		return;
+	}
+	if (rpcClient) {
+		logRpcDebug("Skipping RPC setup because client already exists");
+		return;
+	}
 	if (!DISCORD_CLIENT_ID) {
 		console.warn("[BV] DISCORD_CLIENT_ID not set — Rich Presence disabled");
 		return;
 	}
-    
+
 	DiscordRPC.register(DISCORD_CLIENT_ID);
 
 	rpcClient = new DiscordRPC.Client({ transport: "ipc" });
 	rpcClient.on("ready", () => {
+		if (rpcShutdownRequested || rpcClientDestroyed) return;
 		rpcReady = true;
 		console.log("[BV] Discord RPC ready");
 		// mainWindow will be set in main.ts
@@ -54,28 +74,49 @@ export function setupRpc() {
 	});
 
 	rpcClient.login({ clientId: DISCORD_CLIENT_ID }).catch((err: any) => {
+		if (rpcShutdownRequested || rpcClientDestroyed) return;
 		console.warn("[BV] Discord RPC login failed:", err.message);
 	});
 }
 
 export function updateRpcActivity(win: BrowserWindow | null) {
-	if (!rpcReady || !rpcClient || !win || win.isDestroyed()) {
+	if (
+		rpcShutdownRequested ||
+		rpcClientDestroyed ||
+		!rpcReady ||
+		!rpcClient ||
+		!win ||
+		win.isDestroyed()
+	) {
 		return;
 	}
 	if (rpcActivityDebounce) clearTimeout(rpcActivityDebounce);
 	rpcActivityDebounce = setTimeout(() => {
+		if (
+			rpcShutdownRequested ||
+			rpcClientDestroyed ||
+			!rpcReady ||
+			!rpcClient ||
+			!win ||
+			win.isDestroyed()
+		) {
+			return;
+		}
 		try {
 			const activity = buildActivityFromWindow(win);
 			rpcClient!.setActivity(activity).catch((err: any) => {
+				if (rpcShutdownRequested || rpcClientDestroyed) return;
 				console.warn("[BV] Discord RPC setActivity failed:", err.message);
 			});
 		} catch (err: any) {
+			if (rpcShutdownRequested || rpcClientDestroyed) return;
 			console.warn("[BV] Discord RPC update error:", err.message);
 		}
 	}, 1000);
 }
 
 export function setRichPresenceOverride(win: BrowserWindow, payload: any) {
+	if (rpcShutdownRequested || rpcClientDestroyed) return;
 	if (!win || win.isDestroyed()) return;
 	if (!payload || typeof payload !== "object") {
 		rpcPresenceOverrides.delete(win.webContents.id);

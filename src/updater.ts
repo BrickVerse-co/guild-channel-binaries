@@ -17,7 +17,7 @@ export function setupAutoUpdater(win: BrowserWindow) {
 				}
 			});
 	});
-    
+
 	autoUpdater.on("update-downloaded", () => {
 		dialog
 			.showMessageBox(win, {
@@ -30,6 +30,15 @@ export function setupAutoUpdater(win: BrowserWindow) {
 			.then(() => {
 				autoUpdater.quitAndInstall();
 			});
+	});
+
+	autoUpdater.on("update-not-available", () => {
+		dialog.showMessageBox(win, {
+			type: "info",
+			title: "No Updates Found",
+			message: "You are already running the latest version.",
+			buttons: ["OK"],
+		});
 	});
 
 	autoUpdater.on("error", (err) => {
