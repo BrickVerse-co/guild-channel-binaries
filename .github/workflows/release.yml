@@ -1,0 +1,122 @@
+name: Release Guild Chat
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Build unpacked application
+        run: npx electron-builder --win --x64 --dir --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign Guild Chat executable
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_PROFILE_NAME }}
+          files: release/win-unpacked/BrickVerseGuildChannels.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: BrickVerse Guild Chat
+          description-url: https://brickverse.gg
+      - name: Verify signature
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature -FilePath "release/win-unpacked/BrickVerseGuildChannels.exe"
+          if ($signature.Status -ne "Valid") { throw "Invalid application signature: $($signature.Status)" }
+      - name: Package signed ZIP
+        shell: pwsh
+        run: npx electron-builder --win zip --x64 --prepackaged "release/win-unpacked" --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guild-chat-windows
+          path: release/*.zip
+          if-no-files-found: error
+
+  build-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            command: npm run dist:mac
+            artifact: guild-chat-macos
+          - os: ubuntu-latest
+            command: npm run dist:linux
+            artifact: guild-chat-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Verify ZIP artifacts
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(release/*.zip)
+          (( ${#files[@]} > 0 )) || exit 1
+          for file in "${files[@]}"; do unzip -t "$file"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [build-windows, build-unix]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="v$(node -p "require('./package.json').version")"
+          fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --generate-notes
+          fi
+          mapfile -d '' files < <(find release-assets -type f -name '*.zip' -print0)
+          (( ${#files[@]} > 0 )) || exit 1
+          gh release upload "$tag" "${files[@]}" --clobber

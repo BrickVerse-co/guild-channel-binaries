@@ -1,6 +1,6 @@
 {
 	"name": "guild-channel-binaries",
-	"version": "1.0.0",
+	"version": "1.0.6",
 	"description": "BrickVerse Guild Channels desktop app",
 	"main": "dist/main.js",
 	"author": {
@@ -20,7 +20,12 @@
 	"scripts": {
 		"build": "tsc",
 		"start": "npm run build && electron .",
+		"demo:presence-relay": "node scripts/demo-presence-relay.js",
+		"sdk:pack": "npm pack ./sdk",
 		"dist": "npm run build && electron-builder --publish never",
+		"dist:win": "npm run build && electron-builder --win zip --x64 --publish never",
+		"dist:mac": "npm run build && electron-builder --mac zip --universal --publish never",
+		"dist:linux": "npm run build && electron-builder --linux zip --x64 --arm64 --publish never",
 		"release": "npm run build && electron-builder --publish always",
 		"build:win:unsigned": "npm run build && electron-builder --win --publish never",
 		"build:win": "npm run build:win:unsigned && npm run sign:win",
@@ -29,9 +34,10 @@
 	"build": {
 		"appId": "gg.brickverse.guildchannels",
 		"productName": "BrickVerseGuildChannels",
-		"artifactName": "${productName}-Setup.${ext}",
+		"artifactName": "${productName}-${os}-${arch}.${ext}",
 		"directories": {
-			"buildResources": "assets"
+			"buildResources": "assets",
+			"output": "release"
 		},
 		"asarUnpack": [
 			"assets/**"
@@ -47,19 +53,17 @@
 		],
 		"mac": {
 			"target": [
-				"dmg",
 				"zip"
 			]
 		},
 		"win": {
 			"target": [
-				"nsis"
+				"zip"
 			]
 		},
 		"linux": {
 			"target": [
-				"AppImage",
-				"deb"
+				"zip"
 			],
 			"category": "Network",
 			"maintainer": "Meta Games LLC <support@brickverse.gg>"
@@ -74,8 +78,7 @@
 	},
 	"dependencies": {
 		"discord-rpc": "^4.0.1",
-		"dotenv": "^17.4.2",
-		"electron-updater": "^6.8.3"
+		"dotenv": "^17.4.2"
 	},
 	"devDependencies": {
 		"@types/discord-rpc": "^4.0.10",

@@ -15,7 +15,7 @@ import {
 } from "./rpc";
 import { getIconPath, updateNotificationIcon } from "./notification";
 import { loadState, saveState } from "./windowState";
-import { checkForUpdates, setupAutoUpdater } from "./updater";
+import { startPresenceRelay, stopPresenceRelay } from "./presence-relay";
 
 let rpcEnabled = true;
 ipcMain.handle("bv-open-devtools", (event) => {
@@ -127,7 +127,6 @@ function createWindow(): BrowserWindow {
 	});
 
 	mainWindow = win;
-	setupAutoUpdater(win);
 	win.on("closed", () => {
 		if (mainWindow === win) {
 			mainWindow = null;
@@ -245,7 +244,7 @@ ipcMain.handle("bv-set-rich-presence-context", (event, payload) => {
 	return true;
 });
 ipcMain.handle("bv-check-for-updates", async () => {
-	checkForUpdates();
+	await shell.openExternal("brickverse://installer?product=guild-chat");
 	return true;
 });
 
@@ -254,6 +253,7 @@ app.whenReady().then(() => {
 		app.setAppUserModelId("gg.brickverse.guildchannels");
 	}
 	setupRpc();
+	startPresenceRelay(() => activeBaseUrl);
 	createWindow();
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -272,6 +272,7 @@ async function shutdownRpc(reason: string) {
 	console.log(`[RPC] Shutting down Discord RPC: ${reason}`);
 
 	try {
+		stopPresenceRelay();
 		destroyRpcClient();
 	} catch (err) {
 		console.warn("[RPC] Failed to destroy RPC client:", err);
