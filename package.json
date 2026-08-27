@@ -1,6 +1,6 @@
 {
 	"name": "guild-channel-binaries",
-	"version": "1.0.6",
+	"version": "1.0.7",
 	"description": "BrickVerse Guild Channels desktop app",
 	"main": "dist/main.js",
 	"author": {
