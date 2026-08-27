@@ -21,7 +21,6 @@
 		"build": "tsc",
 		"start": "npm run build && electron .",
 		"demo:presence-relay": "node scripts/demo-presence-relay.js",
-		"sdk:pack": "npm pack ./sdk",
 		"dist": "npm run build && electron-builder --publish never",
 		"dist:win": "npm run build && electron-builder --win zip --x64 --publish never",
 		"dist:mac": "npm run build && electron-builder --mac zip --universal --publish never",

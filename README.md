@@ -11,10 +11,6 @@ When BrickVerse Client or Creator is running, Guild Chat listens on a loopback-o
 presence relay and mirrors the same activity sent to Discord into BrickVerse rich
 presence for the currently signed-in user.
 
-The reusable SDK lives in [`sdk/`](sdk/). It supports JavaScript/Node via
-`index.js` and C# via `BrickVerseRichPresence.cs`, so games can integrate without
-depending on Discord’s SDK.
-
 With Guild Chat running and signed in, preview the relay with:
 
 ```powershell
