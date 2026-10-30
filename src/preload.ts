@@ -28,6 +28,13 @@ const desktopApi = {
 	isMaximized: () => windowControl("is-maximized"),
 	close: () => windowControl("close"),
 	checkForUpdates: () => invokeSafe("bv-check-for-updates"),
+	getUpdateState: () => invokeSafe("bv-get-update-state"),
+	installUpdate: () => invokeSafe("bv-install-update"),
+	onUpdateState: (listener: (state: any) => void) => {
+		const wrapped = (_event: Electron.IpcRendererEvent, state: any) => listener(state);
+		ipcRenderer.on("bv-update-state", wrapped);
+		return () => ipcRenderer.removeListener("bv-update-state", wrapped);
+	},
 	openDevTools: () => invokeSafe("bv-open-devtools"),
 	setRpcEnabled: (enabled: boolean) =>
 		invokeSafe("bv-set-rpc-enabled", enabled),

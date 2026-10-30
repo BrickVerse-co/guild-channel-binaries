@@ -8,6 +8,19 @@ let rpcActivityDebounce: NodeJS.Timeout | null = null;
 const rpcPresenceOverrides = new Map<number, any>();
 let rpcClientDestroyed = false;
 let rpcShutdownRequested = false;
+let rpcEnabled = true;
+
+export function setRpcEnabled(enabled: boolean, win?: BrowserWindow | null): boolean {
+	rpcEnabled = enabled;
+	if (!enabled) {
+		if (rpcActivityDebounce) clearTimeout(rpcActivityDebounce);
+		rpcActivityDebounce = null;
+		if (rpcReady && rpcClient) void rpcClient.clearActivity().catch(() => undefined);
+	} else if (win) {
+		updateRpcActivity(win);
+	}
+	return rpcEnabled;
+}
 
 export function destroyRpcClient() {
 	console.log("[BV] Destroying RPC client...");
@@ -84,6 +97,7 @@ export function updateRpcActivity(win: BrowserWindow | null) {
 		rpcShutdownRequested ||
 		rpcClientDestroyed ||
 		!rpcReady ||
+		!rpcEnabled ||
 		!rpcClient ||
 		!win ||
 		win.isDestroyed()

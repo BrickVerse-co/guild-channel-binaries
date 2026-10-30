@@ -22,9 +22,9 @@
 		"start": "npm run build && electron .",
 		"demo:presence-relay": "node scripts/demo-presence-relay.js",
 		"dist": "npm run build && electron-builder --publish never",
-		"dist:win": "npm run build && electron-builder --win zip --x64 --publish never",
-		"dist:mac": "npm run build && electron-builder --mac zip --universal --publish never",
-		"dist:linux": "npm run build && electron-builder --linux zip --x64 --arm64 --publish never",
+		"dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+		"dist:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never",
+		"dist:linux": "npm run build && electron-builder --linux AppImage --x64 --arm64 --publish never",
 		"release": "npm run build && electron-builder --publish always",
 		"build:win:unsigned": "npm run build && electron-builder --win --publish never",
 		"build:win": "npm run build:win:unsigned && npm run sign:win",
@@ -52,17 +52,26 @@
 		],
 		"mac": {
 			"target": [
+				"dmg",
 				"zip"
-			]
+			],
+			"category": "public.app-category.social-networking"
 		},
 		"win": {
 			"target": [
-				"zip"
+				"nsis"
 			]
+		},
+		"nsis": {
+			"oneClick": false,
+			"allowToChangeInstallationDirectory": true,
+			"createDesktopShortcut": true,
+			"createStartMenuShortcut": true,
+			"deleteAppDataOnUninstall": false
 		},
 		"linux": {
 			"target": [
-				"zip"
+				"AppImage"
 			],
 			"category": "Network",
 			"maintainer": "Meta Games LLC <support@brickverse.gg>"
@@ -77,12 +86,14 @@
 	},
 	"dependencies": {
 		"discord-rpc": "^4.0.1",
-		"dotenv": "^17.4.2"
+		"dotenv": "^17.4.2",
+		"electron-updater": "^6.8.11"
 	},
 	"devDependencies": {
 		"@types/discord-rpc": "^4.0.10",
 		"dotenv-cli": "^11.0.0",
-		"electron": "^41.2.0",
-		"electron-builder": "^25.1.8"
+		"electron": "^45.1.0",
+		"electron-builder": "^26.18.0",
+		"typescript": "^5.9.3"
 	}
 }

@@ -5,6 +5,9 @@ import {
 	nativeImage,
 	ipcMain,
 	Tray,
+	Menu,
+	session,
+	globalShortcut,
 } from "electron";
 import path from "node:path";
 import {
@@ -12,12 +15,13 @@ import {
 	destroyRpcClient,
 	updateRpcActivity,
 	setRichPresenceOverride,
+	setRpcEnabled,
 } from "./rpc";
 import { getIconPath, updateNotificationIcon } from "./notification";
 import { loadState, saveState } from "./windowState";
 import { startPresenceRelay, stopPresenceRelay } from "./presence-relay";
+import { checkForUpdates, configureUpdater, getUpdateState, installUpdate } from "./updater";
 
-let rpcEnabled = true;
 ipcMain.handle("bv-open-devtools", (event) => {
 	const win = BrowserWindow.fromWebContents(event.sender);
 	if (win && !win.isDestroyed()) {
@@ -28,9 +32,7 @@ ipcMain.handle("bv-open-devtools", (event) => {
 });
 
 ipcMain.handle("bv-set-rpc-enabled", (event, enabled: boolean) => {
-	rpcEnabled = !!enabled;
-	// Optionally: destroy or re-init RPC client here
-	return rpcEnabled;
+	return setRpcEnabled(!!enabled, BrowserWindow.fromWebContents(event.sender));
 });
 
 ipcMain.handle("bv-get-about-info", async () => {
@@ -72,7 +74,12 @@ function getBaseMode(): "local" | "live" {
 }
 
 function isInternalAppUrl(url: string): boolean {
-	return url.startsWith(LOCAL_BASE_URL) || url.startsWith(LIVE_BASE_URL);
+	try {
+		const parsed = new URL(url);
+		return parsed.origin === LOCAL_BASE_URL || parsed.origin === LIVE_BASE_URL;
+	} catch {
+		return false;
+	}
 }
 
 function getSwitchedUrl(url: string): string {
@@ -121,8 +128,9 @@ function createWindow(): BrowserWindow {
 		webPreferences: {
 			contextIsolation: true,
 			nodeIntegration: false,
-			sandbox: false,
+			sandbox: true,
 			preload: path.join(__dirname, "preload.js"),
+			spellcheck: true,
 		},
 	});
 
@@ -130,6 +138,12 @@ function createWindow(): BrowserWindow {
 	win.on("closed", () => {
 		if (mainWindow === win) {
 			mainWindow = null;
+		}
+	});
+	win.on("close", (event) => {
+		if (!isQuitting && tray) {
+			event.preventDefault();
+			win.hide();
 		}
 	});
 
@@ -174,11 +188,20 @@ function createWindow(): BrowserWindow {
 	win.webContents.setWindowOpenHandler(({ url }) => {
 		if (isInternalAppUrl(url)) {
 			setImmediate(() => win.loadURL(url));
-			return { action: "allow" };
+			return { action: "deny" };
 		} else {
 			shell.openExternal(url);
 			return { action: "deny" };
 		}
+	});
+
+	win.webContents.on("before-input-event", (event, input) => {
+		if (input.type !== "keyDown") return;
+		const modifier = process.platform === "darwin" ? input.meta : input.control;
+		if (modifier && input.key.toLowerCase() === "r") { event.preventDefault(); input.shift ? win.webContents.reloadIgnoringCache() : win.reload(); }
+		if (modifier && ["+", "="].includes(input.key)) { event.preventDefault(); win.webContents.setZoomLevel(win.webContents.getZoomLevel() + 0.5); }
+		if (modifier && input.key === "-") { event.preventDefault(); win.webContents.setZoomLevel(win.webContents.getZoomLevel() - 0.5); }
+		if (modifier && input.key === "0") { event.preventDefault(); win.webContents.setZoomLevel(0); }
 	});
 
 	win.webContents.on("will-navigate", (event, url) => {
@@ -243,18 +266,49 @@ ipcMain.handle("bv-set-rich-presence-context", (event, payload) => {
 	setRichPresenceOverride(win, payload);
 	return true;
 });
-ipcMain.handle("bv-check-for-updates", async () => {
-	await shell.openExternal("brickverse://installer?product=guild-chat");
-	return true;
-});
+ipcMain.handle("bv-check-for-updates", () => checkForUpdates(true));
+ipcMain.handle("bv-get-update-state", () => getUpdateState());
+ipcMain.handle("bv-install-update", () => installUpdate());
+
+function createTray(): void {
+	if (tray) return;
+	tray = new Tray(nativeImage.createFromPath(getIconPath()));
+	tray.setToolTip("BrickVerse Guild Channels");
+	tray.setContextMenu(Menu.buildFromTemplate([
+		{ label: "Open Guild Channels", click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+		{ label: "Check for updates", click: () => void checkForUpdates(true) },
+		{ type: "separator" },
+		{ label: "Quit", click: () => { isQuitting = true; app.quit(); } },
+	]));
+	tray.on("click", () => { mainWindow?.show(); mainWindow?.focus(); });
+}
+
+function configureWebSession(): void {
+	const allowed = new Set(["media", "notifications", "fullscreen", "clipboard-sanitized-write"]);
+	session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+		isInternalAppUrl(requestingOrigin) && allowed.has(permission),
+	);
+	session.defaultSession.setPermissionRequestHandler((contents, permission, callback) =>
+		callback(isInternalAppUrl(contents.getURL()) && allowed.has(permission)),
+	);
+	session.defaultSession.on("will-download", (_event, item) => {
+		item.once("done", (_downloadEvent, state) => {
+			if (state === "completed") shell.showItemInFolder(item.getSavePath());
+		});
+	});
+}
 
 app.whenReady().then(() => {
 	if (process.platform === "win32") {
 		app.setAppUserModelId("gg.brickverse.guildchannels");
 	}
+	configureWebSession();
+	configureUpdater();
 	setupRpc();
 	startPresenceRelay(() => activeBaseUrl);
 	createWindow();
+	createTray();
+	setTimeout(() => void checkForUpdates(false), 5000);
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
 			createWindow();
@@ -295,11 +349,6 @@ app.on("quit", () => {
 
 app.on("window-all-closed", () => {
 	void shutdownRpc("window-all-closed");
-
-	if (tray) {
-		tray.destroy();
-		tray = null;
-	}
 
 	if (process.platform !== "darwin") {
 		app.quit();
@@ -356,3 +405,8 @@ process.once("unhandledRejection", async (reason) => {
 process.once("warning", (warning) => {
 	console.warn("[Warning] Process warning:", warning);
 });
+
+app.on("will-quit", () => globalShortcut.unregisterAll());
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) app.quit();

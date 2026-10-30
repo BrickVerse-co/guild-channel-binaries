@@ -4,8 +4,13 @@ A lightweight Electron desktop wrapper for the BrickVerse Guild Channels UI, pro
 
 This client allows you to run Guild Channels as a standalone desktop app, with features like app icons/notification indicators similar to apps like Discord.
 
-Tagged releases automatically publish installer-managed ZIP builds for Windows,
-macOS, and Linux. Application updates are handled by BrickVerse Installer.
+Tagged releases publish installable Windows (NSIS), macOS (DMG/ZIP), and Linux
+(AppImage) builds. Installed clients check GitHub Releases automatically, download
+differential update patches where supported, and offer a restart-to-update action.
+
+Desktop integration includes a system tray, unread badges, media and notification
+permissions for the BrickVerse origin, spellcheck, downloads, zoom/reload shortcuts,
+single-instance behavior, Discord Rich Presence, and loopback game presence relay.
 
 When BrickVerse Client or Creator is running, Guild Chat listens on a loopback-only
 presence relay and mirrors the same activity sent to Discord into BrickVerse rich

@@ -39,7 +39,8 @@ async function windowControl(action: string) {
 			if (typeof api.minimize === "function") return api.minimize();
 			break;
 		case "toggle-maximize":
-			if (typeof api.toggleMaximize === "function") return api.toggleMaximize();
+			if (typeof api.toggleMaximize === "function")
+				return api.toggleMaximize();
 			break;
 		case "is-maximized":
 			if (typeof api.isMaximized === "function") return api.isMaximized();
@@ -48,10 +49,12 @@ async function windowControl(action: string) {
 			if (typeof api.close === "function") return api.close();
 			break;
 		case "get-base-url-mode":
-			if (typeof api.getBaseUrlMode === "function") return api.getBaseUrlMode();
+			if (typeof api.getBaseUrlMode === "function")
+				return api.getBaseUrlMode();
 			break;
 		case "toggle-base-url":
-			if (typeof api.toggleBaseUrl === "function") return api.toggleBaseUrl();
+			if (typeof api.toggleBaseUrl === "function")
+				return api.toggleBaseUrl();
 			break;
 	}
 	throw new Error(`[BV] windowControl unsupported action: ${action}`);
@@ -240,6 +243,7 @@ function bindEvents(bar: HTMLElement) {
 				</div>
 				<div style="margin-bottom:18px;width:100%;">
 					<button id="bv-update-btn" style="padding:6px 18px;border-radius:6px;background:#444;color:#fff;border:none;width:100%;">Check for Updates</button>
+					<div id="bv-update-status" role="status" style="color:#b5bac1;font-size:12px;margin-top:8px;text-align:center;">Updates are checked automatically.</div>
 				</div>
 				<button id="bv-settings-close" style="margin-top:8px;padding:6px 18px;border-radius:6px;background:#444;color:#fff;border:none;">Close</button>
 			</div>
@@ -272,14 +276,40 @@ function bindEvents(bar: HTMLElement) {
 		});
 		// Update check button
 		const updateBtn = document.getElementById("bv-update-btn");
+		const updateStatus = document.getElementById("bv-update-status");
+		const renderUpdateState = (state: any) => {
+			if (!state || !updateBtn || !updateStatus) return;
+			const messages: Record<string, string> = {
+				idle: "Updates are checked automatically.",
+				checking: "Checking for updates…",
+				available: `Version ${state.version || ""} is available.`,
+				"not-available": state.message || "You’re up to date.",
+				downloading: `Downloading update… ${state.percent ?? 0}% ${state.message || ""}`,
+				downloaded: `Version ${state.version || ""} is ready to install.`,
+				error: state.message || "Update check failed.",
+			};
+			updateStatus.textContent = messages[state.status] || "";
+			updateBtn.textContent =
+				state.status === "downloaded"
+					? "Restart to Update"
+					: "Check for Updates";
+			(updateBtn as HTMLButtonElement).disabled = [
+				"checking",
+				"downloading",
+			].includes(state.status);
+		};
+		api?.onUpdateState?.(renderUpdateState);
+		api?.getUpdateState?.().then(renderUpdateState);
 		updateBtn?.addEventListener("click", async (event) => {
 			event.preventDefault();
 			event.stopPropagation();
 			try {
 				updateBtn.setAttribute("disabled", "true");
-				if (api?.checkForUpdates) {
-					await api.checkForUpdates();
-				}
+				const current = await api?.getUpdateState?.();
+				if (current?.status === "downloaded")
+					await api?.installUpdate?.();
+				else if (api?.checkForUpdates)
+					renderUpdateState(await api.checkForUpdates());
 			} catch (err) {
 				console.error("[BV] checkForUpdates failed", err);
 			} finally {
@@ -454,9 +484,5 @@ export function installDesktopTitlebar(desktopApi?: any) {
 			syncCloudButton();
 		}
 	}, TITLE_REFRESH_MS);
-	// Auto-check for updates on launch
-	if (window.bvDesktop?.checkForUpdates) {
-		window.bvDesktop.checkForUpdates();
-	}
 	console.log("[BV] titlebar installed");
 }

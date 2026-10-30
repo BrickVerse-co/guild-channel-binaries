@@ -58,10 +58,7 @@ export function updateNotificationIcon(win: BrowserWindow) {
 		try {
 			// Tray is managed in main.ts
 			if (process.platform === "win32") {
-				win.setOverlayIcon(
-					nativeImage.createFromPath(iconPath),
-					"Notifications",
-				);
+				win.setOverlayIcon(count > 0 ? nativeImage.createFromPath(iconPath) : null, count > 0 ? `${count} unread notifications` : "");
 			} else {
 				win.setIcon(image);
 			}

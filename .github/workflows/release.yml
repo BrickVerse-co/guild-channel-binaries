@@ -49,15 +49,18 @@ jobs:
         run: |
           $signature = Get-AuthenticodeSignature -FilePath "release/win-unpacked/BrickVerseGuildChannels.exe"
           if ($signature.Status -ne "Valid") { throw "Invalid application signature: $($signature.Status)" }
-      - name: Package signed ZIP
+      - name: Package installer and update metadata
         shell: pwsh
-        run: npx electron-builder --win zip --x64 --prepackaged "release/win-unpacked" --publish never
+        run: npx electron-builder --win nsis --x64 --prepackaged "release/win-unpacked" --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
           name: guild-chat-windows
-          path: release/*.zip
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
           if-no-files-found: error
 
   build-unix:
@@ -82,17 +85,20 @@ jobs:
       - run: ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - name: Verify ZIP artifacts
+      - name: Verify update artifacts
         shell: bash
         run: |
-          shopt -s nullglob
-          files=(release/*.zip)
-          (( ${#files[@]} > 0 )) || exit 1
-          for file in "${files[@]}"; do unzip -t "$file"; done
+          find release -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' \) | grep -q .
+          find release -maxdepth 1 -type f -name '*.yml' | grep -q .
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: release/*.zip
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.blockmap
+            release/*.yml
           if-no-files-found: error
 
   publish:
@@ -117,6 +123,6 @@ jobs:
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --title "$tag" --generate-notes
           fi
-          mapfile -d '' files < <(find release-assets -type f -name '*.zip' -print0)
+          mapfile -d '' files < <(find release-assets -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.blockmap' -o -name '*.yml' \) -print0)
           (( ${#files[@]} > 0 )) || exit 1
           gh release upload "$tag" "${files[@]}" --clobber
