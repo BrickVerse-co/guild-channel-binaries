@@ -38,6 +38,8 @@ const desktopApi = {
 	openDevTools: () => invokeSafe("bv-open-devtools"),
 	setRpcEnabled: (enabled: boolean) =>
 		invokeSafe("bv-set-rpc-enabled", enabled),
+	getPresenceSettings: () => invokeSafe("bv-get-presence-settings"),
+	setPresenceSettings: (settings: any) => invokeSafe("bv-set-presence-settings", settings),
 	getAboutInfo: () => invokeSafe("bv-get-about-info"),
 };
 

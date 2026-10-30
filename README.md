@@ -22,6 +22,15 @@ With Guild Chat running and signed in, preview the relay with:
 npm run demo:presence-relay
 ```
 
+## Local Rich Presence API
+
+Local apps can publish a presence datagram to `127.0.0.1:45837`. The client only
+accepts loopback UDP packets smaller than 16 KiB, validates every field, and sends
+the activity through the signed-in user's session. Use `source: "brickverse-rpc-v1"`,
+an `activityType` of `GAME`, `MUSIC`, or `CUSTOM`, and an `applicationName`.
+Publishing is still subject to the user's account-level and desktop privacy toggles.
+See `scripts/demo-presence-relay.js` for a complete payload.
+
 
 > Note: This is purely a convenience wrapper. All functionality is available directly on the web, and this client is not required to use Guild Channels.
 

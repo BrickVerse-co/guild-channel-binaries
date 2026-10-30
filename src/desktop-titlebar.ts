@@ -236,11 +236,18 @@ function bindEvents(bar: HTMLElement) {
 						<input type="checkbox" id="bv-setting-devtools" /> Enable DevTools
 					</label>
 				</div>
-				<div style="margin-bottom:18px;width:100%;">
-					<label style="display:flex;align-items:center;gap:8px;color:#dbdee1;font-size:14px;">
-						<input type="checkbox" id="bv-setting-rpc" checked /> Enable Discord Rich Presence
-					</label>
-				</div>
+				<fieldset style="margin-bottom:18px;width:100%;border:1px solid #444;border-radius:8px;padding:12px;color:#dbdee1;">
+					<legend style="font-size:13px;padding:0 5px;">Activity sharing</legend>
+					<label style="display:block;margin-bottom:8px;"><input type="checkbox" id="bv-setting-presence" /> Share rich presence on BrickVerse</label>
+					<label style="display:block;margin-bottom:8px;"><input type="checkbox" id="bv-setting-games" /> Detect supported games (opt-in)</label>
+					<label style="display:block;margin-bottom:8px;"><input type="checkbox" id="bv-setting-music" /> Detect Spotify window activity (opt-in)</label>
+					<label style="display:block;margin-bottom:8px;"><input type="checkbox" id="bv-setting-rpc" /> Mirror Guild Channels to Discord</label>
+					<label style="display:block;margin-bottom:8px;"><input type="checkbox" id="bv-setting-custom" /> Use a custom activity</label>
+					<input id="bv-custom-name" maxlength="100" placeholder="Application name" style="width:100%;margin-bottom:6px;padding:6px;background:#1e1f22;color:#fff;border:1px solid #555;border-radius:4px;" />
+					<input id="bv-custom-details" maxlength="128" placeholder="Details" style="width:100%;margin-bottom:6px;padding:6px;background:#1e1f22;color:#fff;border:1px solid #555;border-radius:4px;" />
+					<input id="bv-custom-state" maxlength="128" placeholder="State" style="width:100%;padding:6px;background:#1e1f22;color:#fff;border:1px solid #555;border-radius:4px;" />
+					<small style="display:block;color:#b5bac1;margin-top:8px;">Process and window detection stays on this device. Only the selected activity text is sent.</small>
+				</fieldset>
 				<div style="margin-bottom:18px;width:100%;">
 					<button id="bv-update-btn" style="padding:6px 18px;border-radius:6px;background:#444;color:#fff;border:none;width:100%;">Check for Updates</button>
 					<div id="bv-update-status" role="status" style="color:#b5bac1;font-size:12px;margin-top:8px;text-align:center;">Updates are checked automatically.</div>
@@ -264,16 +271,37 @@ function bindEvents(bar: HTMLElement) {
 		const rpcCheckbox = document.getElementById(
 			"bv-setting-rpc",
 		) as HTMLInputElement;
+		const presenceCheckbox = document.getElementById("bv-setting-presence") as HTMLInputElement;
+		const gamesCheckbox = document.getElementById("bv-setting-games") as HTMLInputElement;
+		const musicCheckbox = document.getElementById("bv-setting-music") as HTMLInputElement;
+		const customCheckbox = document.getElementById("bv-setting-custom") as HTMLInputElement;
+		const customName = document.getElementById("bv-custom-name") as HTMLInputElement;
+		const customDetails = document.getElementById("bv-custom-details") as HTMLInputElement;
+		const customState = document.getElementById("bv-custom-state") as HTMLInputElement;
+		const savePresenceSettings = () => api?.setPresenceSettings?.({
+			enabled: presenceCheckbox.checked, discordEnabled: rpcCheckbox.checked,
+			detectGames: gamesCheckbox.checked, detectMusic: musicCheckbox.checked,
+			customEnabled: customCheckbox.checked, customName: customName.value,
+			customDetails: customDetails.value, customState: customState.value,
+		});
+		api?.getPresenceSettings?.().then((settings: any) => {
+			if (!settings) return;
+			presenceCheckbox.checked = settings.enabled;
+			rpcCheckbox.checked = settings.discordEnabled;
+			gamesCheckbox.checked = settings.detectGames;
+			musicCheckbox.checked = settings.detectMusic;
+			customCheckbox.checked = settings.customEnabled;
+			customName.value = settings.customName || "";
+			customDetails.value = settings.customDetails || "";
+			customState.value = settings.customState || "";
+		});
 		devtoolsCheckbox.addEventListener("change", () => {
 			if (api?.openDevTools) {
 				api.openDevTools();
 			}
 		});
-		rpcCheckbox.addEventListener("change", () => {
-			if (api?.setRpcEnabled) {
-				api.setRpcEnabled(rpcCheckbox.checked);
-			}
-		});
+		for (const input of [presenceCheckbox, gamesCheckbox, musicCheckbox, rpcCheckbox, customCheckbox]) input.addEventListener("change", savePresenceSettings);
+		for (const input of [customName, customDetails, customState]) input.addEventListener("change", savePresenceSettings);
 		// Update check button
 		const updateBtn = document.getElementById("bv-update-btn");
 		const updateStatus = document.getElementById("bv-update-status");

@@ -1,7 +1,9 @@
 const dgram = require("node:dgram");
 
 const payload = Buffer.from(JSON.stringify({
-	source: "brickverse-client",
+	source: "brickverse-rpc-v1",
+	activityType: "CUSTOM",
+	rpcSource: "demo-api",
 	applicationId: "871308379992260629",
 	applicationName: "BrickVerse Presence Preview",
 	details: "Testing rich presence relay",

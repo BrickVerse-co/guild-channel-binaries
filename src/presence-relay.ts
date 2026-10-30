@@ -7,6 +7,11 @@ let relay: dgram.Socket | null = null;
 let latestRequest: Promise<void> = Promise.resolve();
 let pendingPayload: Record<string, unknown> | null = null;
 let publishTimer: NodeJS.Timeout | null = null;
+let lastExternalActivityAt = 0;
+
+export function hasRecentExternalActivity(): boolean {
+	return Date.now() - lastExternalActivityAt < 30_000;
+}
 
 function text(value: unknown, maximum: number): string | undefined {
 	if (typeof value !== "string") return undefined;
@@ -25,13 +30,15 @@ function imageUrl(value: unknown, applicationId: string | undefined): string | u
 function normalizePayload(input: unknown): Record<string, unknown> | null {
 	if (!input || typeof input !== "object") return null;
 	const value = input as Record<string, any>;
-	if (value.source !== "brickverse-client") return null;
+	if (value.source !== "brickverse-client" && value.source !== "brickverse-rpc-v1") return null;
 	const applicationId = text(value.applicationId, 64);
 	const party = value.party && typeof value.party === "object" ? value.party : {};
 	const size = Array.isArray(party.size) && party.size.length === 2
 		? [Math.max(0, Number(party.size[0]) || 0), Math.max(0, Number(party.size[1]) || 0)]
 		: undefined;
 	return {
+		activityType: value.activityType === "MUSIC" || value.activityType === "CUSTOM" ? value.activityType : "GAME",
+		source: text(value.rpcSource, 32) ?? "local-api",
 		applicationId,
 		applicationName: text(value.applicationName, 100) ?? "BrickVerse",
 		details: text(value.details, 128),
@@ -52,7 +59,7 @@ function normalizePayload(input: unknown): Record<string, unknown> | null {
 	};
 }
 
-async function publishPresence(baseUrl: string, payload: Record<string, unknown>): Promise<void> {
+export async function publishPresence(baseUrl: string, payload: Record<string, unknown>): Promise<void> {
 	const response = await session.defaultSession.fetch(`${baseUrl}/api/v3/social/presence/rich`, {
 		method: "PUT",
 		headers: { "Content-Type": "application/json" },
@@ -86,6 +93,7 @@ export function startPresenceRelay(getBaseUrl: () => string): void {
 		try {
 			const payload = normalizePayload(JSON.parse(message.toString("utf8")));
 			if (!payload) return;
+			lastExternalActivityAt = Date.now();
 			queue(payload);
 		} catch {
 			// Ignore malformed local datagrams.
