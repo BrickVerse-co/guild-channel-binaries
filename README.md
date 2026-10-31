@@ -32,6 +32,8 @@ Local apps can publish a presence datagram to `127.0.0.1:45837`. The client only
 accepts loopback UDP packets smaller than 16 KiB, validates every field, and sends
 the activity through the signed-in user's session. Use `source: "brickverse-rpc-v1"`,
 an `activityType` of `GAME`, `MUSIC`, or `CUSTOM`, and an `applicationName`.
+Active publishers must send a heartbeat at least every 30 seconds. Each relay update
+expires after 60 seconds, so stopped or crashed applications clear automatically.
 Publishing is still subject to the user's account-level and desktop privacy toggles.
 See `scripts/demo-presence-relay.js` for a complete payload.
 

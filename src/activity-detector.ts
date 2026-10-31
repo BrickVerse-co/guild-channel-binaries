@@ -17,6 +17,8 @@ const GAMES: Array<[RegExp, string]> = [
 ];
 const GAME_PATH = /[\\/](steamapps[\\/]common|epic games|gog games|xboxgames|riot games|ea games|ubisoft)[\\/]/i;
 const NON_GAMES = /^(steam|steamwebhelper|epicgameslauncher|galaxyclient|riotclientservices|eadesktop|upc|ubisoftconnect|crashhandler|unins)/i;
+const SPOTIFY_PROCESS = /^spotify(?:ab\.spotifymusic)?$/i;
+const SPOTIFY_IDLE_TITLES = /^(spotify(?: premium| free)?|spotify music)$/i;
 
 export type DetectedActivity = {
 	activityType: "GAME" | "MUSIC" | "CUSTOM";
@@ -34,7 +36,7 @@ async function windowsProcesses(): Promise<
 > {
 	if (process.platform !== "win32") return [];
 	const script =
-		"Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object ProcessName,MainWindowTitle,Path | ConvertTo-Json -Compress";
+		"Get-Process | Where-Object {$_.MainWindowTitle -or $_.ProcessName -like 'Spotify*'} | Select-Object ProcessName,MainWindowTitle,Path | ConvertTo-Json -Compress";
 	const { stdout } = await execFileAsync(
 		"powershell.exe",
 		["-NoProfile", "-NonInteractive", "-Command", script],
@@ -48,6 +50,15 @@ async function windowsProcesses(): Promise<
 	}));
 }
 
+export async function isSpotifyRunning(): Promise<boolean> {
+	try {
+		return (await windowsProcesses()).some((item) => SPOTIFY_PROCESS.test(item.name));
+	} catch (error) {
+		console.warn("[BV][Presence] Spotify process detection failed:", error);
+		return false;
+	}
+}
+
 function gameNameFromProcess(processInfo: { name: string; title: string; path: string }): string | null {
 	const known = GAMES.find(([pattern]) => pattern.test(processInfo.name));
 	if (known) return known[1];
@@ -57,6 +68,26 @@ function gameNameFromProcess(processInfo: { name: string; title: string; path: s
 	const folderName = commonIndex >= 0 ? pathParts[commonIndex + 1] : "";
 	const title = processInfo.title.replace(/\s+[-–—]\s+(DirectX\s*\d+|Vulkan|OpenGL)$/i, "").trim();
 	return (folderName || title || processInfo.name).replace(/[_-]+/g, " ").trim().slice(0, 100) || null;
+}
+
+function spotifyActivity(title: string): DetectedActivity | null {
+	const normalizedTitle = title.trim();
+	if (!normalizedTitle || SPOTIFY_IDLE_TITLES.test(normalizedTitle)) return null;
+
+	// Spotify's Windows title is normally "Artist - Track". Preserve the full
+	// title as the metadata query while presenting Discord-style song/artist rows.
+	const separator = normalizedTitle.indexOf(" - ");
+	const artist = separator > 0 ? normalizedTitle.slice(0, separator).trim() : "";
+	const track = separator > 0 ? normalizedTitle.slice(separator + 3).trim() : normalizedTitle;
+	return {
+		activityType: "MUSIC",
+		source: "desktop-detector",
+		applicationName: "Spotify",
+		details: track,
+		state: artist ? `by ${artist}` : "Listening on Spotify",
+		ttlSeconds: 90,
+		metadataQuery: normalizedTitle,
+	};
 }
 
 export async function detectActivity(
@@ -78,20 +109,11 @@ export async function detectActivity(
 		if (settings.detectMusic) {
 			const spotify = processes.find(
 				(item) =>
-					item.name.toLowerCase() === "spotify" &&
+					SPOTIFY_PROCESS.test(item.name) &&
 					item.title &&
-					item.title.toLowerCase() !== "spotify",
+					!SPOTIFY_IDLE_TITLES.test(item.title.trim()),
 			);
-			if (spotify)
-				return {
-					activityType: "MUSIC",
-					source: "desktop-detector",
-					applicationName: "Spotify",
-					details: spotify.title,
-					state: "Listening on Spotify",
-					ttlSeconds: 90,
-					metadataQuery: spotify.title,
-				};
+			if (spotify) return spotifyActivity(spotify.title);
 		}
 		if (settings.detectGames) {
 			for (const processInfo of processes) {

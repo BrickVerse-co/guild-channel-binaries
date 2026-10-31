@@ -1,5 +1,5 @@
 import dgram from "node:dgram";
-import { session } from "electron";
+import { authenticatedApiFetch } from "./api-session";
 
 const RELAY_PORT = 45837;
 const MAX_PACKET_BYTES = 16 * 1024;
@@ -55,19 +55,29 @@ function normalizePayload(input: unknown): Record<string, unknown> | null {
 			start: text(value.timestamps?.start, 64),
 			end: text(value.timestamps?.end, 64),
 		},
-		ttlSeconds: 300,
+		// Relay publishers must heartbeat at least once per minute. A one-shot test
+		// therefore cannot suppress Spotify or other detected activity indefinitely.
+		ttlSeconds: 60,
 	};
 }
 
 export async function publishPresence(baseUrl: string, payload: Record<string, unknown>): Promise<void> {
-	const response = await session.defaultSession.fetch(`${baseUrl}/api/v3/social/presence/rich`, {
+	const response = await authenticatedApiFetch(`${baseUrl}/api/v3/social/presence/rich`, {
 		method: "PUT",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(payload),
-		credentials: "include",
 	});
 	if (!response.ok && response.status !== 401) {
 		console.warn(`[BV][Presence Relay] Backend returned HTTP ${response.status}`);
+	}
+}
+
+export async function clearPresence(baseUrl: string): Promise<void> {
+	const response = await authenticatedApiFetch(`${baseUrl}/api/v3/social/presence/rich`, {
+		method: "DELETE",
+	});
+	if (!response.ok && response.status !== 401) {
+		console.warn(`[BV][Presence Relay] Clear returned HTTP ${response.status}`);
 	}
 }
 

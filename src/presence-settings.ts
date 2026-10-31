@@ -16,8 +16,8 @@ export type PresenceSettings = {
 const defaults: PresenceSettings = {
 	enabled: true,
 	discordEnabled: true,
-	detectGames: false,
-	detectMusic: false,
+	detectGames: true,
+	detectMusic: true,
 	customEnabled: false,
 	customName: "BrickVerse",
 	customDetails: "",

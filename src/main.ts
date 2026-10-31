@@ -8,6 +8,7 @@ import {
 	Menu,
 	session,
 	globalShortcut,
+	dialog,
 } from "electron";
 import path from "node:path";
 import {
@@ -21,6 +22,7 @@ import { getIconPath, getNotificationIconPath, updateNotificationIcon } from "./
 import { loadState, saveState } from "./windowState";
 import {
 	hasRecentExternalActivity,
+	clearPresence,
 	publishPresence,
 	startPresenceRelay,
 	stopPresenceRelay,
@@ -31,16 +33,32 @@ import {
 	getUpdateState,
 	installUpdate,
 } from "./updater";
-import { detectActivity } from "./activity-detector";
+import { detectActivity, isSpotifyRunning } from "./activity-detector";
 import {
 	loadPresenceSettings,
 	savePresenceSettings,
 } from "./presence-settings";
 import { loadDesktopSettings, saveDesktopSettings } from "./desktop-settings";
+import { authenticatedApiFetch } from "./api-session";
 
 let presenceSettings = loadPresenceSettings();
 let desktopSettings = loadDesktopSettings();
 let activityTimer: NodeJS.Timeout | null = null;
+let spotifyPromptShown = false;
+let hasPublishedDetectedPresence = false;
+let lastPresenceDiagnosticState = "";
+let lastSpotifyPlaybackState = "";
+let lastSpotifyConnectionState = "";
+
+async function clearDetectedPresence(): Promise<void> {
+	if (!hasPublishedDetectedPresence) return;
+	hasPublishedDetectedPresence = false;
+	try {
+		await clearPresence(getApiBaseUrl());
+	} catch (error) {
+		console.warn("[BV][Presence] Failed to clear detected activity:", error);
+	}
+}
 
 ipcMain.handle("bv-open-devtools", (event) => {
 	const win = BrowserWindow.fromWebContents(event.sender);
@@ -100,7 +118,15 @@ ipcMain.handle("bv-get-about-info", async () => {
 const IS_DEV = process.env.NODE_ENV === "development";
 const LOCAL_BASE_URL = "http://localhost:3000";
 const LIVE_BASE_URL = "https://brickverse.gg";
+const LOCAL_API_BASE_URL = "http://127.0.0.1:3001";
+const LIVE_API_BASE_URL = "https://api.brickverse.gg";
 let activeBaseUrl = IS_DEV ? LOCAL_BASE_URL : LIVE_BASE_URL;
+
+function getApiBaseUrl(): string {
+	return activeBaseUrl === LOCAL_BASE_URL
+		? LOCAL_API_BASE_URL
+		: LIVE_API_BASE_URL;
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -140,8 +166,8 @@ function refreshWindowIndicators(win: BrowserWindow): void {
 	tray.setToolTip(count > 0 ? `BrickVerse Guild Channels · ${count} unread` : "BrickVerse Guild Channels");
 }
 
-function getDefaultUrl(): string {
-	return `${activeBaseUrl}/guilds/0/channels/landing`;
+function getDefaultUrl(lastGuildUrl?: string): string {
+	return `${activeBaseUrl}${lastGuildUrl || "/guilds/0/channels/landing"}`;
 }
 
 function getBaseMode(): "local" | "live" {
@@ -154,6 +180,15 @@ function isInternalAppUrl(url: string): boolean {
 		return (
 			parsed.origin === LOCAL_BASE_URL || parsed.origin === LIVE_BASE_URL
 		);
+	} catch {
+		return false;
+	}
+}
+
+function isApiUrl(url: string): boolean {
+	try {
+		const origin = new URL(url).origin;
+		return origin === new URL(getApiBaseUrl()).origin;
 	} catch {
 		return false;
 	}
@@ -231,7 +266,7 @@ function createWindow(): BrowserWindow {
 		win.show();
 	});
 
-	win.loadURL(getDefaultUrl());
+	win.loadURL(getDefaultUrl(state.lastGuildUrl));
 	const persist = () => saveState(win);
 
 	win.on("resize", persist);
@@ -265,6 +300,19 @@ function createWindow(): BrowserWindow {
 		if (isInternalAppUrl(url)) {
 			setImmediate(() => win.loadURL(url));
 			return { action: "deny" };
+		} else if (isApiUrl(url)) {
+			// Connection OAuth starts on the authenticated API origin, then follows
+			// the provider flow in an isolated child window sharing this session.
+			return {
+				action: "allow",
+				overrideBrowserWindowOptions: {
+					parent: win,
+					modal: true,
+					width: 640,
+					height: 760,
+					webPreferences: { nodeIntegration: false, contextIsolation: true },
+				},
+			};
 		} else {
 			shell.openExternal(url);
 			return { action: "deny" };
@@ -476,11 +524,10 @@ function configureWebSession(): void {
 
 async function syncPresencePreferences(): Promise<void> {
 	try {
-		await session.defaultSession.fetch(
-			`${activeBaseUrl}/api/v3/social/presence/rich/settings`,
+		const response = await authenticatedApiFetch(
+			`${getApiBaseUrl()}/api/v3/social/presence/rich/settings`,
 			{
 				method: "PATCH",
-				credentials: "include",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					richPresenceEnabled: presenceSettings.enabled,
@@ -489,15 +536,130 @@ async function syncPresencePreferences(): Promise<void> {
 				}),
 			},
 		);
+		if (!response.ok) {
+			console.warn(`[BV][Presence] Preference sync returned HTTP ${response.status}: ${await response.text()}`);
+		}
 	} catch (error) {
 		console.warn("[BV][Presence] Failed to sync preferences:", error);
 	}
 }
 
+async function promptSpotifyConnection(): Promise<void> {
+	if (spotifyPromptShown || !mainWindow || mainWindow.isDestroyed()) return;
+	spotifyPromptShown = true;
+	const choice = await dialog.showMessageBox(mainWindow, {
+		type: "info",
+		title: "Connect Spotify",
+		message: "Spotify is running. Connect it to show accurate listening activity on your BrickVerse profile.",
+		detail: "BrickVerse reads only your current playback. Spotify cannot be used to sign in.",
+		buttons: ["Connect Spotify", "Not now"],
+		defaultId: 0,
+		cancelId: 1,
+	});
+	if (choice.response === 0 && mainWindow && !mainWindow.isDestroyed()) {
+		presenceSettings = savePresenceSettings({ ...presenceSettings, detectMusic: true });
+		await syncPresencePreferences();
+		void mainWindow.loadURL(`${activeBaseUrl}/my/settings/connections`);
+	}
+}
+
 async function refreshDetectedActivity(): Promise<void> {
 	if (hasRecentExternalActivity() && !presenceSettings.customEnabled) return;
+	if (!presenceSettings.enabled) {
+		await clearDetectedPresence();
+		return;
+	}
+	const spotifyRunning = await isSpotifyRunning();
+	const diagnosticState = `${presenceSettings.enabled}:${presenceSettings.detectMusic}:${presenceSettings.customEnabled}:${spotifyRunning}`;
+	if (diagnosticState !== lastPresenceDiagnosticState) {
+		lastPresenceDiagnosticState = diagnosticState;
+		console.log(`[BV][Presence] enabled=${presenceSettings.enabled} detectMusic=${presenceSettings.detectMusic} custom=${presenceSettings.customEnabled} spotifyRunning=${spotifyRunning} api=${getApiBaseUrl()}`);
+	}
+	if (
+		presenceSettings.enabled &&
+		!presenceSettings.customEnabled &&
+		spotifyRunning
+	) {
+		try {
+			const statusResponse = await authenticatedApiFetch(
+				`${getApiBaseUrl()}/api/v3/connections/spotify/status`,
+			);
+			if (!statusResponse.ok) {
+				throw new Error(`Spotify connection status returned HTTP ${statusResponse.status}: ${await statusResponse.text()}`);
+			}
+			const status = (await statusResponse.json()) as { connected?: boolean };
+			const connectionState = status.connected ? "linked" : "not linked";
+			if (connectionState !== lastSpotifyConnectionState) {
+				lastSpotifyConnectionState = connectionState;
+				console.log(`[BV][Presence] Spotify connection status: ${connectionState}`);
+			}
+			if (!status.connected) {
+				await promptSpotifyConnection();
+				return;
+			}
+			const response = await authenticatedApiFetch(
+				`${getApiBaseUrl()}/api/v3/connections/spotify/currently-playing`,
+			);
+			if (response.ok) {
+				const result = (await response.json()) as {
+					connected?: boolean;
+					playing?: {
+						trackId?: string | null;
+						isPlaying: boolean;
+						track: string;
+						artists: string;
+						album?: string | null;
+						artworkUrl?: string | null;
+						progressMs: number;
+						durationMs: number;
+						trackUrl?: string | null;
+					} | null;
+				};
+				if (result.connected) {
+					const playbackState = result.playing ? `${result.playing.trackId || result.playing.track}:${result.playing.isPlaying}` : "none";
+					if (playbackState !== lastSpotifyPlaybackState) {
+						lastSpotifyPlaybackState = playbackState;
+						console.log(`[BV][Presence] Spotify playback changed: ${result.playing ? `${result.playing.track} — ${result.playing.artists} (${result.playing.isPlaying ? "playing" : "paused"})` : "nothing currently playing"}`);
+					}
+					if (presenceSettings.detectMusic && result.playing) {
+						const now = Date.now();
+						await publishPresence(getApiBaseUrl(), {
+							activityType: "MUSIC",
+							source: "spotify",
+							applicationName: "Spotify",
+							details: result.playing.track,
+							state: `${result.playing.artists ? `by ${result.playing.artists}` : result.playing.album || "Spotify"}${result.playing.isPlaying ? "" : " • Paused"}`,
+							assets: { largeImage: result.playing.artworkUrl, largeText: result.playing.album || result.playing.track },
+							timestamps: result.playing.isPlaying ? {
+								start: new Date(now - result.playing.progressMs).toISOString(),
+								end: new Date(now + Math.max(0, result.playing.durationMs - result.playing.progressMs)).toISOString(),
+							} : undefined,
+							playback: { paused: !result.playing.isPlaying, positionMs: result.playing.progressMs, durationMs: result.playing.durationMs },
+							secrets: { join: result.playing.trackUrl || undefined },
+							ttlSeconds: 90,
+						});
+						hasPublishedDetectedPresence = true;
+					}
+					if (presenceSettings.detectMusic) {
+						if (!result.playing) await clearDetectedPresence();
+						return;
+					}
+				}
+			} else {
+				console.warn(`[BV][Presence] Spotify playback returned HTTP ${response.status}: ${await response.text()}`);
+			}
+		} catch (error) {
+			console.warn(
+				`[BV][Presence] BrickVerse Spotify proxy lookup failed (${getApiBaseUrl()}):`,
+				error,
+			);
+		}
+	}
 	const activity = await detectActivity(presenceSettings);
-	if (!activity) return;
+	if (!activity) {
+		await clearDetectedPresence();
+		return;
+	}
 	try {
 		const { metadataQuery, ...payload } = activity;
 		if (
@@ -505,11 +667,10 @@ async function refreshDetectedActivity(): Promise<void> {
 			(activity.activityType === "GAME" ||
 				activity.activityType === "MUSIC")
 		) {
-			const response = await session.defaultSession.fetch(
-				`${activeBaseUrl}/api/v3/social/presence/metadata`,
+			const response = await authenticatedApiFetch(
+				`${getApiBaseUrl()}/api/v3/social/presence/metadata`,
 				{
 					method: "POST",
-					credentials: "include",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
 						type: activity.activityType,
@@ -536,7 +697,8 @@ async function refreshDetectedActivity(): Promise<void> {
 				}
 			}
 		}
-		await publishPresence(activeBaseUrl, payload);
+		await publishPresence(getApiBaseUrl(), payload);
+		hasPublishedDetectedPresence = true;
 	} catch (error) {
 		console.warn(
 			"[BV][Presence] Failed to publish detected activity:",
@@ -546,6 +708,7 @@ async function refreshDetectedActivity(): Promise<void> {
 }
 
 app.whenReady().then(() => {
+	console.log(`[BV][Presence] Starting activity monitor; API=${getApiBaseUrl()}`);
 	app.setAsDefaultProtocolClient("brickverse");
 	app.setLoginItemSettings({ openAtLogin: desktopSettings.launchAtLogin });
 	if (process.platform === "win32") {
@@ -556,10 +719,9 @@ app.whenReady().then(() => {
 	configureUpdater();
 	setupRpc();
 	setRpcEnabled(presenceSettings.discordEnabled);
-	startPresenceRelay(() => activeBaseUrl);
-	activityTimer = setInterval(() => void refreshDetectedActivity(), 15_000);
+	startPresenceRelay(getApiBaseUrl);
+	activityTimer = setInterval(() => void refreshDetectedActivity(), 5_000);
 	setTimeout(() => {
-		void syncPresencePreferences();
 		void refreshDetectedActivity();
 	}, 3000);
 	createWindow();
@@ -589,6 +751,7 @@ async function shutdownRpc(reason: string) {
 	try {
 		if (activityTimer) clearInterval(activityTimer);
 		activityTimer = null;
+		await clearDetectedPresence();
 		stopPresenceRelay();
 		destroyRpcClient();
 	} catch (err) {
@@ -677,7 +840,12 @@ process.once("warning", (warning) => {
 	console.warn("[Warning] Process warning:", warning);
 });
 
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => {
+	// A second instance can fail to acquire the lock and quit before Electron is
+	// ready. globalShortcut is unavailable until readiness, and there cannot be
+	// any registered shortcuts to clean up in that case.
+	if (app.isReady()) globalShortcut.unregisterAll();
+});
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) app.quit();

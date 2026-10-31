@@ -19,7 +19,7 @@
 	},
 	"scripts": {
 		"build": "tsc",
-		"start": "npm run build && electron .",
+		"start": "npm run build && cross-env NODE_ENV=development electron .",
 		"demo:presence-relay": "node scripts/demo-presence-relay.js",
 		"dist": "npm run build && electron-builder --publish never",
 		"dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
@@ -36,7 +36,9 @@
 		"protocols": [
 			{
 				"name": "BrickVerse Guild Channels",
-				"schemes": ["brickverse"]
+				"schemes": [
+					"brickverse"
+				]
 			}
 		],
 		"artifactName": "${productName}-${os}-${arch}.${ext}",
@@ -97,6 +99,7 @@
 	},
 	"devDependencies": {
 		"@types/discord-rpc": "^4.0.10",
+		"cross-env": "^10.1.0",
 		"dotenv-cli": "^11.0.0",
 		"electron": "^45.1.0",
 		"electron-builder": "^26.18.0",
