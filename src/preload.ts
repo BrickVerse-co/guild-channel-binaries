@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { installDesktopTitlebar } from "./desktop-titlebar";
 
 const invokeSafe = (channel: string, ...args: any[]) => {
 	try {
@@ -44,17 +43,3 @@ const desktopApi = {
 };
 
 contextBridge.exposeInMainWorld("bvDesktop", desktopApi);
-
-const boot = () => {
-	try {
-		installDesktopTitlebar(desktopApi);
-	} catch (err) {
-		console.error("[BV] installDesktopTitlebar failed", err);
-	}
-};
-
-if (document.readyState === "loading") {
-	window.addEventListener("DOMContentLoaded", boot, { once: true });
-} else {
-	boot();
-}

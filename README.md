@@ -11,6 +11,8 @@ differential update patches where supported, and offer a restart-to-update actio
 Desktop integration includes a system tray, unread badges, media and notification
 permissions for the BrickVerse origin, spellcheck, downloads, zoom/reload shortcuts,
 single-instance behavior, Discord Rich Presence, and loopback game presence relay.
+The main site uses the operating system's native window frame; the client does not
+inject titlebars, navigation controls, styles, or layout offsets into web pages.
 
 When BrickVerse Client or Creator is running, Guild Chat listens on a loopback-only
 presence relay and mirrors the same activity sent to Discord into BrickVerse rich

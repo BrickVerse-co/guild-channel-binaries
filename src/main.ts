@@ -96,6 +96,7 @@ let activeBaseUrl = IS_DEV ? LOCAL_BASE_URL : LIVE_BASE_URL;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let settingsWindow: BrowserWindow | null = null;
 
 function getDefaultUrl(): string {
 	return `${activeBaseUrl}/guilds/0/channels/landing`;
@@ -154,8 +155,7 @@ function createWindow(): BrowserWindow {
 		x: Number.isFinite(state.x) ? state.x : undefined,
 		y: Number.isFinite(state.y) ? state.y : undefined,
 		show: false,
-		frame: false,
-		titleBarStyle: process.platform === "darwin" ? "hidden" : undefined,
+		frame: true,
 		backgroundColor: "#313338",
 		autoHideMenuBar: true,
 		icon: nativeImage.createFromPath(iconPath),
@@ -317,6 +317,60 @@ ipcMain.handle("bv-check-for-updates", () => checkForUpdates(true));
 ipcMain.handle("bv-get-update-state", () => getUpdateState());
 ipcMain.handle("bv-install-update", () => installUpdate());
 
+function createSettingsWindow(): void {
+	if (settingsWindow && !settingsWindow.isDestroyed()) {
+		settingsWindow.show();
+		settingsWindow.focus();
+		return;
+	}
+	settingsWindow = new BrowserWindow({
+		width: 520,
+		height: 650,
+		minWidth: 440,
+		minHeight: 560,
+		parent: mainWindow || undefined,
+		show: false,
+		autoHideMenuBar: true,
+		title: "BrickVerse Desktop Settings",
+		backgroundColor: "#1e1f22",
+		icon: nativeImage.createFromPath(getIconPath()),
+		webPreferences: {
+			contextIsolation: true,
+			nodeIntegration: false,
+			sandbox: true,
+			preload: path.join(__dirname, "preload.js"),
+		},
+	});
+	settingsWindow.once("ready-to-show", () => settingsWindow?.show());
+	settingsWindow.on("closed", () => { settingsWindow = null; });
+	void settingsWindow.loadFile(path.join(__dirname, "../src/settings.html"));
+}
+
+function createApplicationMenu(): void {
+	const template: Electron.MenuItemConstructorOptions[] = [
+		{
+			label: "BrickVerse",
+			submenu: [
+				{ label: "Desktop Settings…", accelerator: "CmdOrCtrl+,", click: createSettingsWindow },
+				{ label: "Check for Updates", click: () => void checkForUpdates(true) },
+				{ type: "separator" },
+				{ role: "quit" },
+			],
+		},
+		{
+			label: "Navigate",
+			submenu: [
+				{ label: "Back", accelerator: "Alt+Left", click: () => { if (mainWindow?.webContents.canGoBack()) mainWindow.webContents.goBack(); } },
+				{ label: "Forward", accelerator: "Alt+Right", click: () => { if (mainWindow?.webContents.canGoForward()) mainWindow.webContents.goForward(); } },
+				{ label: "Reload", accelerator: "CmdOrCtrl+R", click: () => mainWindow?.reload() },
+				{ type: "separator" },
+				{ role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" },
+			],
+		},
+	];
+	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createTray(): void {
 	if (tray) return;
 	tray = new Tray(nativeImage.createFromPath(getIconPath()));
@@ -330,6 +384,7 @@ function createTray(): void {
 					mainWindow?.focus();
 				},
 			},
+			{ label: "Desktop Settings", click: createSettingsWindow },
 			{
 				label: "Check for updates",
 				click: () => void checkForUpdates(true),
@@ -451,6 +506,7 @@ app.whenReady().then(() => {
 		app.setAppUserModelId("gg.brickverse.guildchannels");
 	}
 	configureWebSession();
+	createApplicationMenu();
 	configureUpdater();
 	setupRpc();
 	setRpcEnabled(presenceSettings.discordEnabled);

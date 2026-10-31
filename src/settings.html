@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+	<title>BrickVerse Desktop Settings</title>
+	<style>
+		:root{color-scheme:dark;font-family:Inter,Segoe UI,sans-serif;background:#1e1f22;color:#dbdee1}body{margin:0;padding:28px}h1{font-size:22px;margin:0 0 6px}p{color:#949ba4;margin:0 0 24px}.card{background:#2b2d31;border:1px solid #3f4147;border-radius:12px;padding:18px;margin-bottom:16px}.row{display:flex;gap:10px;align-items:flex-start;margin:13px 0}.row input{margin-top:3px}.row label{font-weight:600}.row small{display:block;color:#949ba4;font-weight:400;margin-top:3px}.fields{display:grid;gap:9px;margin-top:14px}input[type=text]{background:#1e1f22;color:#fff;border:1px solid #4e5058;border-radius:6px;padding:10px}button{border:0;border-radius:6px;background:#5865f2;color:#fff;padding:10px 16px;font-weight:700;cursor:pointer}#status{margin-left:10px;color:#a8b1bd;font-size:13px}
+	</style>
+</head>
+<body>
+	<h1>Desktop settings</h1>
+	<p>These settings affect this installed client. Account visibility remains available in BrickVerse privacy settings.</p>
+	<section class="card">
+		<div class="row"><input type="checkbox" id="enabled"><label for="enabled">Share rich presence<small>Publish enabled activity sources to BrickVerse.</small></label></div>
+		<div class="row"><input type="checkbox" id="games"><label for="games">Detect games<small>Detect supported launchers locally and resolve cover artwork.</small></label></div>
+		<div class="row"><input type="checkbox" id="music"><label for="music">Detect Spotify<small>Use local playback window metadata and resolve album artwork.</small></label></div>
+		<div class="row"><input type="checkbox" id="discord"><label for="discord">Discord Rich Presence<small>Mirror Guild Channels activity to Discord.</small></label></div>
+	</section>
+	<section class="card">
+		<div class="row"><input type="checkbox" id="custom"><label for="custom">Use custom activity<small>Custom activity takes priority over automatic detection.</small></label></div>
+		<div class="fields"><input type="text" id="name" maxlength="100" placeholder="Application name"><input type="text" id="details" maxlength="128" placeholder="Details"><input type="text" id="state" maxlength="128" placeholder="State"></div>
+	</section>
+	<button id="save" type="button">Save settings</button><span id="status" role="status"></span>
+	<script src="../dist/settings-renderer.js"></script>
+</body>
+</html>
