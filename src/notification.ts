@@ -2,6 +2,8 @@ import { app, nativeImage, Tray, BrowserWindow } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 
+const previousCounts = new WeakMap<BrowserWindow, number>();
+
 export function getIconPath(): string {
 	if (process.platform === "win32") {
 		return path.join(__dirname, "../assets/icon.ico");
@@ -45,12 +47,25 @@ export function getNotificationIconPath(count: number): string {
 	return fullPath;
 }
 
-export function updateNotificationIcon(win: BrowserWindow) {
-	if (!win || win.isDestroyed()) return;
+export function updateNotificationIcon(win: BrowserWindow): number {
+	if (!win || win.isDestroyed()) return 0;
 	const title = win.getTitle();
 	const count = extractNotificationCount(title);
+	const previousCount = previousCounts.get(win) || 0;
+	previousCounts.set(win, count);
 	const iconPath = getNotificationIconPath(count);
 	const image = nativeImage.createFromPath(iconPath);
+	app.setBadgeCount(count);
+
+	if (count > previousCount && !win.isFocused()) {
+		if (process.platform === "darwin") app.dock?.bounce("informational");
+		else {
+			win.flashFrame(true);
+			win.once("focus", () => {
+				if (!win.isDestroyed()) win.flashFrame(false);
+			});
+		}
+	}
 
 	if (process.platform === "darwin") {
 		if (app && app.dock) app.dock.setIcon(image);
@@ -66,4 +81,5 @@ export function updateNotificationIcon(win: BrowserWindow) {
 			console.error("[BV] Tray/Icon Error:", e);
 		}
 	}
+	return count;
 }

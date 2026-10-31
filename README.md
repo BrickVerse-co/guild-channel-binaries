@@ -8,7 +8,9 @@ Tagged releases publish installable Windows (NSIS), macOS (DMG/ZIP), and Linux
 (AppImage) builds. Installed clients check GitHub Releases automatically, download
 differential update patches where supported, and offer a restart-to-update action.
 
-Desktop integration includes a system tray, unread badges, media and notification
+Desktop integration includes a live unread system-tray icon, taskbar/dock badges,
+attention alerts while unfocused, `brickverse://guilds/.../channels/...` deep links,
+configurable launch-at-login and close-to-tray behavior, media and notification
 permissions for the BrickVerse origin, spellcheck, downloads, zoom/reload shortcuts,
 single-instance behavior, Discord Rich Presence, and loopback game presence relay.
 The main site uses the operating system's native window frame; the client does not

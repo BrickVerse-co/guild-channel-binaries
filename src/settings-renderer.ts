@@ -3,6 +3,8 @@ declare global {
 		bvDesktop?: {
 			getPresenceSettings?: () => Promise<any>;
 			setPresenceSettings?: (value: any) => Promise<any>;
+			getDesktopSettings?: () => Promise<any>;
+			setDesktopSettings?: (value: any) => Promise<any>;
 		};
 	}
 }
@@ -12,7 +14,10 @@ const checkbox = (id: string) => byId<HTMLInputElement>(id);
 const field = (id: string) => byId<HTMLInputElement>(id);
 
 async function load(): Promise<void> {
-	const settings = await window.bvDesktop?.getPresenceSettings?.();
+	const [settings, desktop] = await Promise.all([
+		window.bvDesktop?.getPresenceSettings?.(),
+		window.bvDesktop?.getDesktopSettings?.(),
+	]);
 	if (!settings) return;
 	checkbox("enabled").checked = settings.enabled;
 	checkbox("games").checked = settings.detectGames;
@@ -22,12 +27,14 @@ async function load(): Promise<void> {
 	field("name").value = settings.customName || "";
 	field("details").value = settings.customDetails || "";
 	field("state").value = settings.customState || "";
+	checkbox("launchAtLogin").checked = desktop?.launchAtLogin === true;
+	checkbox("closeToTray").checked = desktop?.closeToTray !== false;
 }
 
 byId<HTMLButtonElement>("save").addEventListener("click", async () => {
 	const status = byId<HTMLSpanElement>("status");
 	status.textContent = "Saving…";
-	await window.bvDesktop?.setPresenceSettings?.({
+	await Promise.all([window.bvDesktop?.setPresenceSettings?.({
 		enabled: checkbox("enabled").checked,
 		detectGames: checkbox("games").checked,
 		detectMusic: checkbox("music").checked,
@@ -36,7 +43,10 @@ byId<HTMLButtonElement>("save").addEventListener("click", async () => {
 		customName: field("name").value,
 		customDetails: field("details").value,
 		customState: field("state").value,
-	});
+	}), window.bvDesktop?.setDesktopSettings?.({
+		launchAtLogin: checkbox("launchAtLogin").checked,
+		closeToTray: checkbox("closeToTray").checked,
+	})]);
 	status.textContent = "Saved";
 });
 

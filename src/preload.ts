@@ -39,6 +39,8 @@ const desktopApi = {
 		invokeSafe("bv-set-rpc-enabled", enabled),
 	getPresenceSettings: () => invokeSafe("bv-get-presence-settings"),
 	setPresenceSettings: (settings: any) => invokeSafe("bv-set-presence-settings", settings),
+	getDesktopSettings: () => invokeSafe("bv-get-desktop-settings"),
+	setDesktopSettings: (settings: any) => invokeSafe("bv-set-desktop-settings", settings),
 	getAboutInfo: () => invokeSafe("bv-get-about-info"),
 };
 

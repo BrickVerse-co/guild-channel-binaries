@@ -17,7 +17,7 @@ import {
 	setRichPresenceOverride,
 	setRpcEnabled,
 } from "./rpc";
-import { getIconPath, updateNotificationIcon } from "./notification";
+import { getIconPath, getNotificationIconPath, updateNotificationIcon } from "./notification";
 import { loadState, saveState } from "./windowState";
 import {
 	hasRecentExternalActivity,
@@ -36,8 +36,10 @@ import {
 	loadPresenceSettings,
 	savePresenceSettings,
 } from "./presence-settings";
+import { loadDesktopSettings, saveDesktopSettings } from "./desktop-settings";
 
 let presenceSettings = loadPresenceSettings();
+let desktopSettings = loadDesktopSettings();
 let activityTimer: NodeJS.Timeout | null = null;
 
 ipcMain.handle("bv-open-devtools", (event) => {
@@ -65,6 +67,12 @@ ipcMain.handle("bv-set-presence-settings", async (_event, value) => {
 	setRpcEnabled(presenceSettings.discordEnabled, mainWindow);
 	await syncPresencePreferences();
 	return presenceSettings;
+});
+ipcMain.handle("bv-get-desktop-settings", () => desktopSettings);
+ipcMain.handle("bv-set-desktop-settings", (_event, value) => {
+	desktopSettings = saveDesktopSettings(value);
+	app.setLoginItemSettings({ openAtLogin: desktopSettings.launchAtLogin });
+	return desktopSettings;
 });
 
 ipcMain.handle("bv-get-about-info", async () => {
@@ -97,6 +105,40 @@ let activeBaseUrl = IS_DEV ? LOCAL_BASE_URL : LIVE_BASE_URL;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let pendingDeepLink: string | null = null;
+
+function resolveDeepLink(value: string): string | null {
+	try {
+		const url = new URL(value);
+		if (url.protocol !== "brickverse:") return null;
+		const pathName = `/${url.hostname}${url.pathname}`.replace(/\/{2,}/g, "/");
+		if (!/^\/guilds\/[^/]+\/channels\/[^/]+(?:\/.*)?$/.test(pathName)) return null;
+		return `${activeBaseUrl}${pathName}${url.search}${url.hash}`;
+	} catch {
+		return null;
+	}
+}
+
+function openDeepLink(value: string): boolean {
+	const target = resolveDeepLink(value);
+	if (!target) return false;
+	if (!mainWindow || mainWindow.isDestroyed()) {
+		pendingDeepLink = value;
+		return true;
+	}
+	mainWindow.show();
+	if (mainWindow.isMinimized()) mainWindow.restore();
+	mainWindow.focus();
+	void mainWindow.loadURL(target);
+	return true;
+}
+
+function refreshWindowIndicators(win: BrowserWindow): void {
+	const count = updateNotificationIcon(win);
+	if (!tray) return;
+	tray.setImage(nativeImage.createFromPath(getNotificationIconPath(count)));
+	tray.setToolTip(count > 0 ? `BrickVerse Guild Channels · ${count} unread` : "BrickVerse Guild Channels");
+}
 
 function getDefaultUrl(): string {
 	return `${activeBaseUrl}/guilds/0/channels/landing`;
@@ -175,7 +217,7 @@ function createWindow(): BrowserWindow {
 		}
 	});
 	win.on("close", (event) => {
-		if (!isQuitting && tray) {
+		if (!isQuitting && tray && desktopSettings.closeToTray) {
 			event.preventDefault();
 			win.hide();
 		}
@@ -200,13 +242,13 @@ function createWindow(): BrowserWindow {
 
 	win.webContents.on("did-finish-load", () => {
 		persist();
-		updateNotificationIcon(win);
+		refreshWindowIndicators(win);
 		updateRpcActivity(win);
 	});
 
 	win.webContents.on("did-navigate", () => {
 		persist();
-		updateNotificationIcon(win);
+		refreshWindowIndicators(win);
 		updateRpcActivity(win);
 	});
 
@@ -215,7 +257,7 @@ function createWindow(): BrowserWindow {
 	});
 
 	win.webContents.on("page-title-updated", () => {
-		updateNotificationIcon(win);
+		refreshWindowIndicators(win);
 		updateRpcActivity(win);
 	});
 
@@ -258,7 +300,7 @@ function createWindow(): BrowserWindow {
 		}
 	});
 
-	updateNotificationIcon(win);
+	refreshWindowIndicators(win);
 
 	return win;
 }
@@ -401,8 +443,10 @@ function createTray(): void {
 	);
 	tray.on("click", () => {
 		mainWindow?.show();
+		if (mainWindow?.isMinimized()) mainWindow.restore();
 		mainWindow?.focus();
 	});
+	if (mainWindow) refreshWindowIndicators(mainWindow);
 }
 
 function configureWebSession(): void {
@@ -502,6 +546,8 @@ async function refreshDetectedActivity(): Promise<void> {
 }
 
 app.whenReady().then(() => {
+	app.setAsDefaultProtocolClient("brickverse");
+	app.setLoginItemSettings({ openAtLogin: desktopSettings.launchAtLogin });
 	if (process.platform === "win32") {
 		app.setAppUserModelId("gg.brickverse.guildchannels");
 	}
@@ -518,6 +564,11 @@ app.whenReady().then(() => {
 	}, 3000);
 	createWindow();
 	createTray();
+	const commandLineLink = process.argv.find((argument) => argument.startsWith("brickverse://"));
+	if (pendingDeepLink) {
+		openDeepLink(pendingDeepLink);
+		pendingDeepLink = null;
+	} else if (commandLineLink) openDeepLink(commandLineLink);
 	setTimeout(() => void checkForUpdates(false), 5000);
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -579,12 +630,20 @@ app.on("activate", () => {
 	}
 });
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, commandLine) => {
 	if (!isQuitting && mainWindow) {
+		const deepLink = commandLine.find((argument) => argument.startsWith("brickverse://"));
+		if (deepLink && openDeepLink(deepLink)) return;
 		mainWindow.show();
+		if (mainWindow.isMinimized()) mainWindow.restore();
 		mainWindow.focus();
 		updateRpcActivity(mainWindow);
 	}
+});
+
+app.on("open-url", (event, url) => {
+	event.preventDefault();
+	if (!openDeepLink(url)) pendingDeepLink = url;
 });
 
 process.once("exit", () => {

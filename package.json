@@ -33,6 +33,12 @@
 	"build": {
 		"appId": "gg.brickverse.guildchannels",
 		"productName": "BrickVerseGuildChannels",
+		"protocols": [
+			{
+				"name": "BrickVerse Guild Channels",
+				"schemes": ["brickverse"]
+			}
+		],
 		"artifactName": "${productName}-${os}-${arch}.${ext}",
 		"directories": {
 			"buildResources": "assets",
