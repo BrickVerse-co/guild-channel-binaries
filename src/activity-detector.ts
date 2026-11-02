@@ -4,7 +4,7 @@ import type { PresenceSettings } from "./presence-settings";
 
 const execFileAsync = promisify(execFile);
 const GAMES: Array<[RegExp, string]> = [
-	[/^(minecraft|javaw)$/i, "Minecraft"],
+	[/^minecraft(?:launcher)?$/i, "Minecraft"],
 	[/^(fortniteclient-win64-shipping)$/i, "Fortnite"],
 	[/^(valorant-win64-shipping)$/i, "VALORANT"],
 	[/^(league of legends)$/i, "League of Legends"],
@@ -13,10 +13,10 @@ const GAMES: Array<[RegExp, string]> = [
 	[/^cs2$/i, "Counter-Strike 2"],
 	[/^dota2$/i, "Dota 2"],
 	[/^eldenring$/i, "Elden Ring"],
-	[/^robloxplayerbeta$/i, "Roblox"],
+	[/^(robloxplayerbeta|windows10universal)$/i, "Roblox"],
 ];
-const GAME_PATH = /[\\/](steamapps[\\/]common|epic games|gog games|xboxgames|riot games|ea games|ubisoft)[\\/]/i;
-const NON_GAMES = /^(steam|steamwebhelper|epicgameslauncher|galaxyclient|riotclientservices|eadesktop|upc|ubisoftconnect|crashhandler|unins)/i;
+const GAME_PATH = /[\\/](steamapps[\\/]common|epic games|gog games|xboxgames|riot games|ea games|ubisoft(?: game launcher)?[\\/]games|roblox[\\/]versions)[\\/]/i;
+const NON_GAMES = /^(steam|steamservice|steamwebhelper|gameoverlayui|epicgameslauncher|epicwebhelper|galaxyclient|riotclientservices|riotclientux|eadesktop|eabackgroundservice|upc|ubisoftconnect|crashhandler|unins|uninstall|unitycrashhandler)/i;
 const SPOTIFY_PROCESS = /^spotify(?:ab\.spotifymusic)?$/i;
 const SPOTIFY_IDLE_TITLES = /^(spotify(?: premium| free)?|spotify music)$/i;
 
@@ -36,7 +36,7 @@ async function windowsProcesses(): Promise<
 > {
 	if (process.platform !== "win32") return [];
 	const script =
-		"Get-Process | Where-Object {$_.MainWindowTitle -or $_.ProcessName -like 'Spotify*'} | Select-Object ProcessName,MainWindowTitle,Path | ConvertTo-Json -Compress";
+		"Get-Process -ErrorAction SilentlyContinue | Select-Object ProcessName,MainWindowTitle,Path | ConvertTo-Json -Compress";
 	const { stdout } = await execFileAsync(
 		"powershell.exe",
 		["-NoProfile", "-NonInteractive", "-Command", script],
@@ -62,12 +62,17 @@ export async function isSpotifyRunning(): Promise<boolean> {
 function gameNameFromProcess(processInfo: { name: string; title: string; path: string }): string | null {
 	const known = GAMES.find(([pattern]) => pattern.test(processInfo.name));
 	if (known) return known[1];
+	if (/^javaw$/i.test(processInfo.name) && /minecraft|\.minecraft|mojang/i.test(`${processInfo.path} ${processInfo.title}`))
+		return "Minecraft";
 	if (!GAME_PATH.test(processInfo.path) || NON_GAMES.test(processInfo.name)) return null;
 	const pathParts = processInfo.path.split(/[\\/]/).filter(Boolean);
-	const commonIndex = pathParts.findIndex((part) => /^(common|epic games|gog games|xboxgames|riot games|ea games|ubisoft)$/i.test(part));
+	const commonIndex = pathParts.findIndex((part) => /^(common|epic games|gog games|xboxgames|riot games|ea games|games|versions)$/i.test(part));
 	const folderName = commonIndex >= 0 ? pathParts[commonIndex + 1] : "";
 	const title = processInfo.title.replace(/\s+[-–—]\s+(DirectX\s*\d+|Vulkan|OpenGL)$/i, "").trim();
-	return (folderName || title || processInfo.name).replace(/[_-]+/g, " ").trim().slice(0, 100) || null;
+	const candidate = /roblox[\\/]versions/i.test(processInfo.path)
+		? "Roblox"
+		: folderName || title || processInfo.name;
+	return candidate.replace(/[_-]+/g, " ").trim().slice(0, 100) || null;
 }
 
 function spotifyActivity(title: string): DetectedActivity | null {

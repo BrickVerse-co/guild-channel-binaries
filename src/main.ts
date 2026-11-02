@@ -595,12 +595,25 @@ async function refreshDetectedActivity(): Promise<void> {
 			}
 			if (!status.connected) {
 				await promptSpotifyConnection();
-				return;
-			}
-			const response = await authenticatedApiFetch(
-				`${getApiBaseUrl()}/api/v3/connections/spotify/currently-playing`,
-			);
-			if (response.ok) {
+			} else {
+				let listenAlong: { hostUserId: string; hostUsername: string } | null = null;
+				try {
+					const listenResponse = await authenticatedApiFetch(
+						`${getApiBaseUrl()}/api/v3/connections/spotify/listen-along`,
+					);
+					if (listenResponse.ok) {
+						const listenResult = (await listenResponse.json()) as {
+							session?: { hostUserId: string; hostUsername: string } | null;
+						};
+						listenAlong = listenResult.session || null;
+					}
+				} catch (error) {
+					console.warn("[BV][Presence] Listen Along sync failed:", error);
+				}
+				const response = await authenticatedApiFetch(
+					`${getApiBaseUrl()}/api/v3/connections/spotify/currently-playing`,
+				);
+				if (response.ok) {
 				const result = (await response.json()) as {
 					connected?: boolean;
 					playing?: {
@@ -628,8 +641,9 @@ async function refreshDetectedActivity(): Promise<void> {
 							source: "spotify",
 							applicationName: "Spotify",
 							details: result.playing.track,
-							state: `${result.playing.artists ? `by ${result.playing.artists}` : result.playing.album || "Spotify"}${result.playing.isPlaying ? "" : " • Paused"}`,
+							state: `${result.playing.artists ? `by ${result.playing.artists}` : result.playing.album || "Spotify"}${listenAlong ? ` • Listening along with ${listenAlong.hostUsername}` : result.playing.isPlaying ? "" : " • Paused"}`,
 							assets: { largeImage: result.playing.artworkUrl, largeText: result.playing.album || result.playing.track },
+							party: listenAlong ? { id: `spotify-listen:${listenAlong.hostUserId}` } : undefined,
 							timestamps: result.playing.isPlaying ? {
 								start: new Date(now - result.playing.progressMs).toISOString(),
 								end: new Date(now + Math.max(0, result.playing.durationMs - result.playing.progressMs)).toISOString(),
@@ -639,14 +653,12 @@ async function refreshDetectedActivity(): Promise<void> {
 							ttlSeconds: 90,
 						});
 						hasPublishedDetectedPresence = true;
-					}
-					if (presenceSettings.detectMusic) {
-						if (!result.playing) await clearDetectedPresence();
 						return;
 					}
 				}
-			} else {
-				console.warn(`[BV][Presence] Spotify playback returned HTTP ${response.status}: ${await response.text()}`);
+				} else {
+					console.warn(`[BV][Presence] Spotify playback returned HTTP ${response.status}: ${await response.text()}`);
+				}
 			}
 		} catch (error) {
 			console.warn(
