@@ -9,6 +9,12 @@ const rpcPresenceOverrides = new Map<number, any>();
 let rpcClientDestroyed = false;
 let rpcShutdownRequested = false;
 let rpcEnabled = true;
+const rpcPageContexts = new Map<number, { title: string; url: string }>();
+
+export function setRpcPageContext(win: BrowserWindow, title: string, url: string): void {
+	if (!win || win.isDestroyed()) return;
+	rpcPageContexts.set(win.webContents.id, { title, url });
+}
 
 export function setRpcEnabled(enabled: boolean, win?: BrowserWindow | null): boolean {
 	rpcEnabled = enabled;
@@ -187,8 +193,9 @@ export function buildActivityFromWindow(win: BrowserWindow): Presence {
 		};
 	}
 
-	const title = win.getTitle();
-	const url = win.webContents.getURL();
+	const context = rpcPageContexts.get(win.webContents.id);
+	const title = context?.title || win.getTitle();
+	const url = context?.url || win.webContents.getURL();
 	const { details, state } = parsePresenceFromPage(title, url);
 
 	return {

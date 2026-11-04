@@ -20,6 +20,8 @@ const setRichPresenceContext = (payload: any) => {
 const desktopApi = {
 	windowControl,
 	setRichPresenceContext,
+	setShellUser: (user: { id?: string; username?: string; headshotUrl?: string } | null) =>
+		invokeSafe("bv-set-shell-user", user),
 	getBaseUrlMode: () => windowControl("get-base-url-mode"),
 	toggleBaseUrl: () => windowControl("toggle-base-url"),
 	minimize: () => windowControl("minimize"),
@@ -42,6 +44,11 @@ const desktopApi = {
 	getDesktopSettings: () => invokeSafe("bv-get-desktop-settings"),
 	setDesktopSettings: (settings: any) => invokeSafe("bv-set-desktop-settings", settings),
 	getAboutInfo: () => invokeSafe("bv-get-about-info"),
+	onCommand: (listener: (command: string) => void) => {
+		const wrapped = (_event: Electron.IpcRendererEvent, command: string) => listener(command);
+		ipcRenderer.on("bv-desktop-command", wrapped);
+		return () => ipcRenderer.removeListener("bv-desktop-command", wrapped);
+	},
 };
 
 contextBridge.exposeInMainWorld("bvDesktop", desktopApi);

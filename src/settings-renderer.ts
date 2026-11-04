@@ -29,6 +29,8 @@ async function load(): Promise<void> {
 	field("state").value = settings.customState || "";
 	checkbox("launchAtLogin").checked = desktop?.launchAtLogin === true;
 	checkbox("closeToTray").checked = desktop?.closeToTray !== false;
+	checkbox("notificationsEnabled").checked = desktop?.notificationsEnabled !== false;
+	checkbox("flashTaskbar").checked = desktop?.flashTaskbar !== false;
 }
 
 byId<HTMLButtonElement>("save").addEventListener("click", async () => {
@@ -46,6 +48,8 @@ byId<HTMLButtonElement>("save").addEventListener("click", async () => {
 	}), window.bvDesktop?.setDesktopSettings?.({
 		launchAtLogin: checkbox("launchAtLogin").checked,
 		closeToTray: checkbox("closeToTray").checked,
+		notificationsEnabled: checkbox("notificationsEnabled").checked,
+		flashTaskbar: checkbox("flashTaskbar").checked,
 	})]);
 	status.textContent = "Saved";
 });

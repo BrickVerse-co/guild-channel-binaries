@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self';img-src 'self' data: https: http:;style-src 'self' 'unsafe-inline';script-src 'self'"
+		/>
+		<title>BrickVerse Guild Channels</title>
+		<style>
+			[hidden] {
+				display: none !important;
+			}
+			.shell-profile {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				width: auto;
+				max-width: 132px;
+				padding: 0 7px;
+			}
+			.shell-profile img {
+				width: 23px;
+				height: 23px;
+				border-radius: 50%;
+				object-fit: cover;
+				background: #303640;
+			}
+			.shell-profile span {
+				max-width: 75px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				font-size: 9px;
+				font-weight: 750;
+			}
+			:root {
+				color-scheme: dark;
+				font-family: Inter, "Segoe UI", Arial, sans-serif;
+				background: #14161a;
+				color: #e8ebf0;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			.topbar {
+				height: 52px;
+				display: grid;
+				grid-template-columns: auto minmax(220px, 1fr) auto;
+				align-items: center;
+				padding: 0 10px;
+				gap: 10px;
+				background: linear-gradient(180deg, #20242a, #191c21);
+				border-bottom: 1px solid #303640;
+				-webkit-app-region: drag;
+				user-select: none;
+			}
+			.nav,
+			.window-controls,
+			.tools {
+				display: flex;
+				align-items: center;
+				gap: 4px;
+				-webkit-app-region: no-drag;
+			}
+			button {
+				border: 0;
+				color: #aeb6c2;
+				background: transparent;
+				height: 34px;
+				min-width: 34px;
+				border-radius: 8px;
+				cursor: pointer;
+			}
+			button:hover:not(:disabled) {
+				color: #fff;
+				background: #303640;
+			}
+			button:disabled {
+				opacity: 0.3;
+			}
+			.icon {
+				width: 15px;
+				height: 15px;
+				fill: none;
+				stroke: currentColor;
+				stroke-width: 2;
+				stroke-linecap: round;
+				stroke-linejoin: round;
+				pointer-events: none;
+			}
+			.brand {
+				display: flex;
+				align-items: center;
+				gap: 9px;
+				padding: 0 8px;
+			}
+			.brand-mark {
+				display: grid;
+				place-items: center;
+				width: 30px;
+				height: 30px;
+				border-radius: 10px;
+				background: #171b20;
+				border: 1px solid #3b4652;
+				box-shadow: 0 5px 16px #0005;
+				overflow: hidden;
+			}
+			.brand-mark img {
+				width: 27px;
+				height: 27px;
+				object-fit: contain;
+			}
+			.brand strong {
+				font-size: 12px;
+			}
+			.brand small {
+				display: block;
+				color: #7f8997;
+				font-size: 9px;
+				margin-top: 1px;
+			}
+			.location-box {
+				justify-self: center;
+				width: min(580px, 100%);
+				height: 34px;
+				display: grid;
+				grid-template-columns: auto minmax(0, 1fr) auto;
+				align-items: center;
+				gap: 9px;
+				padding: 0 11px;
+				border: 1px solid #353b45;
+				border-radius: 10px;
+				background: #111318aa;
+				-webkit-app-region: no-drag;
+			}
+			.location-copy {
+				min-width: 0;
+				text-align: center;
+			}
+			.location-copy strong,
+			.location-copy small {
+				display: block;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.location-copy strong {
+				font-size: 11px;
+			}
+			.location-copy small {
+				font-size: 8px;
+				color: #77818e;
+			}
+			.environment {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				width: auto;
+				padding: 0 8px;
+				font-size: 9px;
+				font-weight: 700;
+			}
+			.environment[data-mode="live"] {
+				color: #35d39a;
+			}
+			.environment[data-mode="local"] {
+				color: #ffb648;
+			}
+			.notification-button {
+				position: relative;
+			}
+			.badge {
+				position: absolute;
+				right: 1px;
+				top: 1px;
+				display: grid;
+				place-items: center;
+				min-width: 15px;
+				height: 15px;
+				padding: 0 3px;
+				border-radius: 8px;
+				background: #f04458;
+				color: #fff;
+				font-size: 8px;
+				font-weight: 800;
+				border: 2px solid #1b1e23;
+			}
+			.update {
+				height: 24px;
+				padding: 0 9px;
+				border-radius: 7px;
+				background: #193b2f;
+				color: #72e3b5;
+				font-size: 9px;
+				font-weight: 700;
+			}
+			.window-controls {
+				height: 52px;
+				margin-right: -10px;
+			}
+			.window-controls button {
+				height: 52px;
+				width: 46px;
+				border-radius: 0;
+			}
+			.window-controls .close:hover {
+				background: #d83a48;
+			}
+			.panel {
+				position: fixed;
+				z-index: 5;
+				right: 136px;
+				top: 46px;
+				width: 340px;
+				padding: 10px;
+				border: 1px solid #373e49;
+				border-radius: 13px;
+				background: #1d2127;
+				box-shadow: 0 18px 48px #0009;
+				opacity: 0;
+				visibility: hidden;
+				transform: translateY(-6px);
+				transition: 0.14s;
+			}
+			.panel.open {
+				opacity: 1;
+				visibility: visible;
+				transform: none;
+			}
+			.panel header {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 8px;
+			}
+			.panel h2 {
+				margin: 0;
+				font-size: 13px;
+			}
+			.summary {
+				display: flex;
+				gap: 11px;
+				align-items: center;
+				margin: 5px 0 8px;
+				padding: 13px;
+				border-radius: 10px;
+				background: #15181d;
+			}
+			.summary-icon {
+				display: grid;
+				place-items: center;
+				width: 34px;
+				height: 34px;
+				border-radius: 10px;
+				background: #153c55;
+				color: #44c3ff;
+			}
+			.summary strong {
+				font-size: 11px;
+			}
+			.summary small {
+				display: block;
+				margin-top: 3px;
+				color: #8993a0;
+				font-size: 9px;
+			}
+			.notification-list {
+				display: grid;
+				gap: 3px;
+				max-height: 220px;
+				overflow: auto;
+				margin-bottom: 5px;
+			}
+			.notification-item {
+				display: grid;
+				width: 100%;
+				height: auto;
+				padding: 9px 10px;
+				text-align: left;
+				border-radius: 8px;
+			}
+			.notification-item.unread {
+				background: #173044;
+				border-left: 2px solid #35bdf6;
+			}
+			.notification-item strong {
+				color: #e8ebf0;
+				font-size: 10px;
+			}
+			.notification-item small {
+				margin-top: 3px;
+				color: #8f99a6;
+				font-size: 9px;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.notification-empty {
+				padding: 14px;
+				text-align: center;
+				color: #7f8997;
+				font-size: 10px;
+			}
+			.panel-action {
+				width: 100%;
+				display: flex;
+				align-items: center;
+				justify-content: flex-start;
+				gap: 10px;
+				padding: 0 10px;
+				font-size: 10px;
+			}
+			.preference {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				margin-top: 8px;
+				padding: 11px;
+				border-top: 1px solid #303640;
+				font-size: 10px;
+			}
+			.preference small {
+				display: block;
+				color: #7f8997;
+				margin-top: 2px;
+			}
+			.preference input {
+				accent-color: #28aef2;
+			}
+			.panel footer {
+				padding: 8px 3px 1px;
+				color: #788391;
+				font-size: 9px;
+			}
+		</style>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="nav">
+				<div class="brand">
+					<span class="brand-mark"
+						><img
+							src="../assets/icon.png"
+							alt="BrickVerse Guild Chat mascot" /></span
+					><span
+						><strong>Guild Channels</strong
+						><small>BrickVerse Desktop</small></span
+					>
+				</div>
+				<button id="back" title="Back">
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="m15 18-6-6 6-6" />
+					</svg></button
+				><button id="forward" title="Forward">
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="m9 18 6-6-6-6" />
+					</svg></button
+				><button id="reload" title="Reload">
+					<svg id="reload-icon" class="icon" viewBox="0 0 24 24">
+						<path d="M20 11a8.1 8.1 0 1 0 2 5.3" />
+						<path d="M20 4v7h-7" />
+					</svg>
+				</button>
+			</div>
+			<div class="location-box">
+				<svg class="icon" viewBox="0 0 24 24">
+					<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z" />
+					<path d="m9 12 2 2 4-4" />
+				</svg>
+				<div class="location-copy">
+					<strong id="page-title">Guild Channels</strong
+					><small id="location">Loading workspace…</small>
+				</div>
+				<button
+					id="environment"
+					class="environment"
+					data-mode="live"
+					title="Switch environment"
+				>
+					<svg class="icon" viewBox="0 0 24 24">
+						<circle cx="12" cy="12" r="10" />
+						<path
+							d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"
+						/></svg
+					><span id="environment-label">Secure</span>
+				</button>
+			</div>
+			<div class="tools">
+				<button id="update-state" class="update" hidden></button
+				><button id="command-palette" title="Quick switcher (Ctrl+K)">
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="m13 2-2 9h9l-11 11 2-9H2z" />
+					</svg></button
+				><button id="app-theme" title="App theme">
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="M12 3a9 9 0 1 0 9 9c0-1-.2-2-.5-2.8A5 5 0 0 1 12 3z" />
+					</svg></button
+				><button
+					id="notifications"
+					class="notification-button"
+					title="Notifications"
+				>
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
+						<path
+							d="M4 17h16c-1.8-2-3-3.5-3-8a5 5 0 0 0-10 0c0 4.5-1.2 6-3 8"
+						/></svg
+					><span id="notification-count" class="badge" hidden>0</span></button
+				><button id="check-updates" title="Check for updates">
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
+					</svg>
+				</button>
+				<div class="window-controls">
+					<button id="minimize" title="Minimize">
+						<svg class="icon" viewBox="0 0 24 24">
+							<path d="M5 12h14" />
+						</svg></button
+					><button id="maximize" title="Maximize">
+						<svg class="icon" viewBox="0 0 24 24">
+							<rect x="5" y="5" width="14" height="14" rx="1" />
+						</svg></button
+					><button id="close" class="close" title="Close">
+						<svg class="icon" viewBox="0 0 24 24">
+							<path d="M18 6 6 18M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+			</div>
+		</header>
+		<aside id="notification-panel" class="panel">
+			<header>
+				<h2>Notifications</h2>
+				<button id="dismiss-panel">
+					<svg class="icon" viewBox="0 0 24 24">
+						<path d="M18 6 6 18M6 6l12 12" />
+					</svg>
+				</button>
+			</header>
+			<div class="summary">
+				<span class="summary-icon"
+					><svg class="icon" viewBox="0 0 24 24">
+						<path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg></span
+				><span
+					><strong id="notification-summary">You're all caught up</strong
+					><small
+						>Mentions and messages from your workspaces appear here.</small
+					></span
+				>
+			</div>
+			<div id="notification-list" class="notification-list">
+				<div class="notification-empty">Loading notifications…</div>
+			</div>
+			<button id="open-dms" class="panel-action">
+				<svg class="icon" viewBox="0 0 24 24">
+					<path
+						d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"
+					/></svg
+				>Open direct messages</button
+			><label class="preference"
+				><span
+					><strong>Desktop notifications</strong
+					><small id="notification-status">Control native alerts</small></span
+				><input id="desktop-notifications" type="checkbox" checked
+			/></label>
+			<footer>Notification center</footer>
+		</aside>
+		<script src="../dist/topbar-renderer.js"></script>
+	</body>
+</html>

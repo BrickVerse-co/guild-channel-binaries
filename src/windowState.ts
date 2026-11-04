@@ -31,11 +31,11 @@ export function loadState(): {
 	};
 }
 
-export function saveState(win: BrowserWindow) {
+export function saveState(win: BrowserWindow, currentUrl?: string) {
 	if (!win || win.isDestroyed()) return;
 	try {
 		const bounds = win.getBounds();
-		rememberedGuildUrl = getGuildUrl(win.webContents.getURL()) || rememberedGuildUrl;
+		rememberedGuildUrl = getGuildUrl(currentUrl || win.webContents.getURL()) || rememberedGuildUrl;
 		const data = {
 			...bounds,
 			isMaximized: win.isMaximized(),

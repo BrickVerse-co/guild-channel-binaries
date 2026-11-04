@@ -9,6 +9,7 @@ import {
 	session,
 	globalShortcut,
 	dialog,
+	WebContentsView,
 } from "electron";
 import path from "node:path";
 import {
@@ -17,6 +18,7 @@ import {
 	updateRpcActivity,
 	setRichPresenceOverride,
 	setRpcEnabled,
+	setRpcPageContext,
 } from "./rpc";
 import { getIconPath, getNotificationIconPath, updateNotificationIcon } from "./notification";
 import { loadState, saveState } from "./windowState";
@@ -61,9 +63,9 @@ async function clearDetectedPresence(): Promise<void> {
 }
 
 ipcMain.handle("bv-open-devtools", (event) => {
-	const win = BrowserWindow.fromWebContents(event.sender);
+	const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
 	if (win && !win.isDestroyed()) {
-		win.webContents.openDevTools({ mode: "detach" });
+		contentContents()?.openDevTools({ mode: "detach" });
 		return true;
 	}
 	return false;
@@ -76,7 +78,7 @@ ipcMain.handle("bv-set-rpc-enabled", (event, enabled: boolean) => {
 	});
 	return setRpcEnabled(
 		presenceSettings.discordEnabled,
-		BrowserWindow.fromWebContents(event.sender),
+		BrowserWindow.fromWebContents(event.sender) || mainWindow,
 	);
 });
 ipcMain.handle("bv-get-presence-settings", () => presenceSettings);
@@ -115,6 +117,22 @@ ipcMain.handle("bv-get-about-info", async () => {
 	};
 });
 
+ipcMain.handle("bv-shell-notifications", async () => {
+	const response = await authenticatedApiFetch(`${getApiBaseUrl()}/api/v3/social/notifications?limit=8`);
+	if (!response.ok) return { success: false, notifications: [] };
+	return response.json();
+});
+ipcMain.handle("bv-shell-read-notification", async (_event, id: string) => {
+	if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) return false;
+	const response = await authenticatedApiFetch(`${getApiBaseUrl()}/api/v3/social/notifications/${id}/read`, { method: "POST" });
+	return response.ok;
+});
+ipcMain.handle("bv-shell-open-path", (_event, value: string) => {
+	if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return false;
+	void loadContentUrl(`${activeBaseUrl}${value}`);
+	return true;
+});
+
 const IS_DEV = process.env.NODE_ENV === "development";
 const LOCAL_BASE_URL = "http://localhost:3000";
 const LIVE_BASE_URL = "https://brickverse.gg";
@@ -129,9 +147,53 @@ function getApiBaseUrl(): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let contentView: WebContentsView | null = null;
 let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let pendingDeepLink: string | null = null;
+const TOPBAR_HEIGHT = 52;
+const shellChromeHeight = TOPBAR_HEIGHT;
+let latestShellState: Record<string, unknown> | null = null;
+let shellUser: { id: string; username: string; headshotUrl: string } | null = null;
+
+function contentContents() {
+	return contentView && !contentView.webContents.isDestroyed()
+		? contentView.webContents
+		: null;
+}
+
+function loadContentUrl(url: string): Promise<void> | undefined {
+	return contentContents()?.loadURL(url);
+}
+
+function updateContentBounds(win: BrowserWindow): void {
+	if (!contentView || win.isDestroyed()) return;
+	const [width, height] = win.getContentSize();
+	contentView.setBounds({ x: 0, y: shellChromeHeight, width, height: Math.max(0, height - shellChromeHeight) });
+}
+
+function pushShellState(win: BrowserWindow): void {
+	const contents = contentContents();
+	if (!contents || win.isDestroyed()) return;
+	const title = contents.getTitle() || "Guild Channels";
+	const url = contents.getURL();
+	win.setTitle(title);
+	setRpcPageContext(win, title, url);
+	latestShellState = {
+		title: title.replace(/^\(\d+\)\s*/, ""),
+		url,
+		unread: updateNotificationIcon(win),
+		canGoBack: contents.navigationHistory.canGoBack(),
+		canGoForward: contents.navigationHistory.canGoForward(),
+		loading: contents.isLoading(),
+		connection: url.startsWith(LOCAL_BASE_URL) ? "local" : "live",
+		isMaximized: win.isMaximized(),
+		user: shellUser,
+	};
+	win.webContents.send("bv-shell-state", latestShellState);
+}
+
+ipcMain.handle("bv-shell-get-state", () => latestShellState);
 
 function resolveDeepLink(value: string): string | null {
 	try {
@@ -155,12 +217,17 @@ function openDeepLink(value: string): boolean {
 	mainWindow.show();
 	if (mainWindow.isMinimized()) mainWindow.restore();
 	mainWindow.focus();
-	void mainWindow.loadURL(target);
+	void loadContentUrl(target);
 	return true;
 }
 
 function refreshWindowIndicators(win: BrowserWindow): void {
 	const count = updateNotificationIcon(win);
+	if (count > 0 && desktopSettings.flashTaskbar && !win.isFocused()) {
+		win.flashFrame(true);
+	} else if (count === 0 || win.isFocused()) {
+		win.flashFrame(false);
+	}
 	if (!tray) return;
 	tray.setImage(nativeImage.createFromPath(getNotificationIconPath(count)));
 	tray.setToolTip(count > 0 ? `BrickVerse Guild Channels · ${count} unread` : "BrickVerse Guild Channels");
@@ -212,12 +279,12 @@ function switchBaseUrl(win: BrowserWindow | null): "local" | "live" {
 	if (!win || win.isDestroyed()) {
 		return getBaseMode();
 	}
-	const currentUrl = win.webContents.getURL();
+	const currentUrl = contentContents()?.getURL() || "";
 	const nextUrl = getSwitchedUrl(currentUrl);
 	activeBaseUrl = nextUrl.startsWith(LOCAL_BASE_URL)
 		? LOCAL_BASE_URL
 		: LIVE_BASE_URL;
-	win.loadURL(nextUrl);
+	void loadContentUrl(nextUrl);
 	return getBaseMode();
 }
 
@@ -232,10 +299,22 @@ function createWindow(): BrowserWindow {
 		x: Number.isFinite(state.x) ? state.x : undefined,
 		y: Number.isFinite(state.y) ? state.y : undefined,
 		show: false,
-		frame: true,
+		frame: false,
 		backgroundColor: "#313338",
 		autoHideMenuBar: true,
 		icon: nativeImage.createFromPath(iconPath),
+		webPreferences: {
+			contextIsolation: true,
+			nodeIntegration: false,
+			// The packaged topbar is trusted local content and needs its context
+			// bridge. The remote Guild Channels view below remains sandboxed.
+			sandbox: false,
+			preload: path.join(__dirname, "topbar-preload.js"),
+		},
+	});
+
+	mainWindow = win;
+	contentView = new WebContentsView({
 		webPreferences: {
 			contextIsolation: true,
 			nodeIntegration: false,
@@ -244,11 +323,12 @@ function createWindow(): BrowserWindow {
 			spellcheck: true,
 		},
 	});
-
-	mainWindow = win;
+	win.contentView.addChildView(contentView);
+	updateContentBounds(win);
 	win.on("closed", () => {
 		if (mainWindow === win) {
 			mainWindow = null;
+			contentView = null;
 		}
 	});
 	win.on("close", (event) => {
@@ -266,39 +346,44 @@ function createWindow(): BrowserWindow {
 		win.show();
 	});
 
-	win.loadURL(getDefaultUrl(state.lastGuildUrl));
-	const persist = () => saveState(win);
+	void win.loadFile(path.join(__dirname, "../src/topbar.html"));
+	win.webContents.on("did-finish-load", () => pushShellState(win));
+	void loadContentUrl(getDefaultUrl(state.lastGuildUrl));
+	const contents = contentView.webContents;
+	const persist = () => saveState(win, contents.getURL());
 
-	win.on("resize", persist);
+	win.on("resize", () => { updateContentBounds(win); persist(); });
 	win.on("move", persist);
 	win.on("maximize", persist);
 	win.on("unmaximize", persist);
 	win.on("close", persist);
 
-	win.webContents.on("did-finish-load", () => {
+	contents.on("did-finish-load", () => {
 		persist();
-		refreshWindowIndicators(win);
+		pushShellState(win);
 		updateRpcActivity(win);
 	});
 
-	win.webContents.on("did-navigate", () => {
+	contents.on("did-navigate", () => {
 		persist();
-		refreshWindowIndicators(win);
+		pushShellState(win);
 		updateRpcActivity(win);
 	});
 
-	win.webContents.on("did-redirect-navigation", () => {
+	contents.on("did-redirect-navigation", () => {
 		persist();
 	});
 
-	win.webContents.on("page-title-updated", () => {
-		refreshWindowIndicators(win);
+	contents.on("page-title-updated", () => {
+		pushShellState(win);
 		updateRpcActivity(win);
 	});
+	contents.on("did-start-loading", () => pushShellState(win));
+	contents.on("did-stop-loading", () => pushShellState(win));
 
-	win.webContents.setWindowOpenHandler(({ url }) => {
+	contents.setWindowOpenHandler(({ url }) => {
 		if (isInternalAppUrl(url)) {
-			setImmediate(() => win.loadURL(url));
+			setImmediate(() => void loadContentUrl(url));
 			return { action: "deny" };
 		} else if (isApiUrl(url)) {
 			// Connection OAuth starts on the authenticated API origin, then follows
@@ -319,36 +404,36 @@ function createWindow(): BrowserWindow {
 		}
 	});
 
-	win.webContents.on("before-input-event", (event, input) => {
+	contents.on("before-input-event", (event, input) => {
 		if (input.type !== "keyDown") return;
 		const modifier =
 			process.platform === "darwin" ? input.meta : input.control;
 		if (modifier && input.key.toLowerCase() === "r") {
 			event.preventDefault();
-			input.shift ? win.webContents.reloadIgnoringCache() : win.reload();
+			input.shift ? contents.reloadIgnoringCache() : contents.reload();
 		}
 		if (modifier && ["+", "="].includes(input.key)) {
 			event.preventDefault();
-			win.webContents.setZoomLevel(win.webContents.getZoomLevel() + 0.5);
+			contents.setZoomLevel(contents.getZoomLevel() + 0.5);
 		}
 		if (modifier && input.key === "-") {
 			event.preventDefault();
-			win.webContents.setZoomLevel(win.webContents.getZoomLevel() - 0.5);
+			contents.setZoomLevel(contents.getZoomLevel() - 0.5);
 		}
 		if (modifier && input.key === "0") {
 			event.preventDefault();
-			win.webContents.setZoomLevel(0);
+			contents.setZoomLevel(0);
 		}
 	});
 
-	win.webContents.on("will-navigate", (event, url) => {
+	contents.on("will-navigate", (event, url) => {
 		if (!isInternalAppUrl(url)) {
 			event.preventDefault();
 			shell.openExternal(url);
 		}
 	});
 
-	refreshWindowIndicators(win);
+	pushShellState(win);
 
 	return win;
 }
@@ -357,7 +442,7 @@ function handleWindowControl(
 	event: Electron.IpcMainInvokeEvent,
 	action: string,
 ): any {
-	const win = BrowserWindow.fromWebContents(event.sender);
+	const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
 	if (!win || win.isDestroyed()) return false;
 	switch (action) {
 		case "minimize":
@@ -370,15 +455,48 @@ function handleWindowControl(
 		case "toggle-maximize":
 			if (win.isMaximized()) {
 				win.unmaximize();
+				pushShellState(win);
 				return false;
 			}
 			win.maximize();
+			pushShellState(win);
 			return true;
 		case "is-maximized":
 			return win.isMaximized();
 		case "close":
 			win.close();
 			return true;
+		case "back":
+			if (contentContents()?.navigationHistory.canGoBack()) contentContents()?.navigationHistory.goBack();
+			return true;
+		case "forward":
+			if (contentContents()?.navigationHistory.canGoForward()) contentContents()?.navigationHistory.goForward();
+			return true;
+		case "reload":
+			contentContents()?.reload();
+			return true;
+		case "command-palette":
+			contentContents()?.send("bv-desktop-command", "command-palette");
+			return true;
+		case "app-theme":
+			contentContents()?.send("bv-desktop-command", "app-theme");
+			return true;
+		case "notifications":
+			contentContents()?.send("bv-desktop-command", "notifications");
+			return true;
+		case "settings":
+			contentContents()?.send("bv-desktop-command", "settings");
+			return true;
+		case "open-profile":
+			if (shellUser?.id) void loadContentUrl(`${activeBaseUrl}/users/${encodeURIComponent(shellUser.id)}`);
+			return Boolean(shellUser?.id);
+		case "open-direct-messages": {
+			const current = contentContents()?.getURL() || getDefaultUrl(loadState().lastGuildUrl);
+			const target = new URL(current);
+			target.searchParams.set("directMessages", "true");
+			void loadContentUrl(target.toString());
+			return true;
+		}
 		default:
 			throw new Error(`Unknown window control action: ${action}`);
 	}
@@ -398,7 +516,7 @@ ipcMain.handle("bv-window-close", (event) =>
 	handleWindowControl(event, "close"),
 );
 ipcMain.handle("bv-set-rich-presence-context", (event, payload) => {
-	const win = BrowserWindow.fromWebContents(event.sender);
+	const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
 	if (!win || win.isDestroyed()) return false;
 	setRichPresenceOverride(win, payload);
 	return true;
@@ -406,6 +524,16 @@ ipcMain.handle("bv-set-rich-presence-context", (event, payload) => {
 ipcMain.handle("bv-check-for-updates", () => checkForUpdates(true));
 ipcMain.handle("bv-get-update-state", () => getUpdateState());
 ipcMain.handle("bv-install-update", () => installUpdate());
+ipcMain.handle("bv-set-shell-user", (_event, value) => {
+	if (!value || typeof value !== "object") shellUser = null;
+	else shellUser = {
+		id: String(value.id || ""),
+		username: String(value.username || "User").slice(0, 80),
+		headshotUrl: String(value.headshotUrl || "").slice(0, 2048),
+	};
+	if (mainWindow && !mainWindow.isDestroyed()) pushShellState(mainWindow);
+	return true;
+});
 
 function createSettingsWindow(): void {
 	if (settingsWindow && !settingsWindow.isDestroyed()) {
@@ -450,9 +578,9 @@ function createApplicationMenu(): void {
 		{
 			label: "Navigate",
 			submenu: [
-				{ label: "Back", accelerator: "Alt+Left", click: () => { if (mainWindow?.webContents.canGoBack()) mainWindow.webContents.goBack(); } },
-				{ label: "Forward", accelerator: "Alt+Right", click: () => { if (mainWindow?.webContents.canGoForward()) mainWindow.webContents.goForward(); } },
-				{ label: "Reload", accelerator: "CmdOrCtrl+R", click: () => mainWindow?.reload() },
+				{ label: "Back", accelerator: "Alt+Left", click: () => { if (contentContents()?.navigationHistory.canGoBack()) contentContents()?.navigationHistory.goBack(); } },
+				{ label: "Forward", accelerator: "Alt+Right", click: () => { if (contentContents()?.navigationHistory.canGoForward()) contentContents()?.navigationHistory.goForward(); } },
+				{ label: "Reload", accelerator: "CmdOrCtrl+R", click: () => contentContents()?.reload() },
 				{ type: "separator" },
 				{ role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" },
 			],
@@ -474,6 +602,25 @@ function createTray(): void {
 					mainWindow?.focus();
 				},
 			},
+			{
+				label: "Direct Messages",
+				click: () => {
+					mainWindow?.show();
+					mainWindow?.focus();
+					const lastGuildUrl = loadState().lastGuildUrl || "/guilds/0/channels/landing";
+					const separator = lastGuildUrl.includes("?") ? "&" : "?";
+					void loadContentUrl(`${activeBaseUrl}${lastGuildUrl}${separator}directMessages=true`);
+				},
+			},
+			{
+				label: "Friends",
+				click: () => {
+					mainWindow?.show();
+					mainWindow?.focus();
+					void loadContentUrl(`${activeBaseUrl}/my/friends`);
+				},
+			},
+			{ type: "separator" },
 			{ label: "Desktop Settings", click: createSettingsWindow },
 			{
 				label: "Check for updates",
@@ -506,12 +653,14 @@ function configureWebSession(): void {
 	]);
 	session.defaultSession.setPermissionCheckHandler(
 		(_contents, permission, requestingOrigin) =>
-			isInternalAppUrl(requestingOrigin) && allowed.has(permission),
+			isInternalAppUrl(requestingOrigin) && allowed.has(permission) &&
+			(permission !== "notifications" || desktopSettings.notificationsEnabled),
 	);
 	session.defaultSession.setPermissionRequestHandler(
 		(contents, permission, callback) =>
 			callback(
-				isInternalAppUrl(contents.getURL()) && allowed.has(permission),
+				isInternalAppUrl(contents.getURL()) && allowed.has(permission) &&
+				(permission !== "notifications" || desktopSettings.notificationsEnabled),
 			),
 	);
 	session.defaultSession.on("will-download", (_event, item) => {
@@ -559,7 +708,7 @@ async function promptSpotifyConnection(): Promise<void> {
 	if (choice.response === 0 && mainWindow && !mainWindow.isDestroyed()) {
 		presenceSettings = savePresenceSettings({ ...presenceSettings, detectMusic: true });
 		await syncPresencePreferences();
-		void mainWindow.loadURL(`${activeBaseUrl}/my/settings/connections`);
+		void loadContentUrl(`${activeBaseUrl}/my/settings/connections`);
 	}
 }
 
@@ -795,6 +944,7 @@ app.on("window-all-closed", () => {
 
 app.on("browser-window-focus", () => {
 	if (!isQuitting && mainWindow) {
+		mainWindow.flashFrame(false);
 		updateRpcActivity(mainWindow);
 	}
 });
